@@ -7,6 +7,7 @@ import (
 	"github.com/sirupsen/logrus"
 	"github.com/ut0mt8/kalag/lag"
 	"net/http"
+	"net/http/pprof"
 	"strconv"
 	"time"
 )
@@ -91,6 +92,7 @@ func main() {
 	}()
 
 	http.Handle("/metrics", promhttp.Handler())
+	http.Handle("/debug/pprof/goroutine", pprof.Handler("goroutine"))
 	log.Info("beginning to serve on port 8080")
 	http.ListenAndServe(":8080", nil)
 }
