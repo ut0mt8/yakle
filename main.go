@@ -82,7 +82,7 @@ func main() {
 				continue
 			}
 			for p, of := range ofs {
-				log.Debugf("get: %d %d %d %d %v\n", p, of.End, of.Current, of.OffsetLag, of.TimeLag)
+				log.Infof("get: %d %d %d %d %v\n", p, of.End, of.Current, of.OffsetLag, of.TimeLag)
 				currentOffsetMetric.WithLabelValues(config.topic, strconv.Itoa(int(p)), config.group).Set(float64(of.Current))
 				endOffsetMetric.WithLabelValues(config.topic, strconv.Itoa(int(p)), config.group).Set(float64(of.End))
 				offsetLagMetric.WithLabelValues(config.topic, strconv.Itoa(int(p)), config.group).Set(float64(of.OffsetLag))
