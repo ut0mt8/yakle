@@ -20,33 +20,33 @@ type Config struct {
 }
 
 var (
-	currentOffsetMetric = prometheus.NewGaugeVec(
+	latestOffsetMetric = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
-			Name: "yakle_current_offset",
-			Help: "Current offset of a specific consumergroup/partition",
+			Name: "yakle_topic_partition_latest_offset",
+			Help: "Latest commited offset of a given topic/partition",
 		},
-		[]string{"topic", "partition", "group"},
+		[]string{"topic", "partition"},
 	)
-	endOffsetMetric = prometheus.NewGaugeVec(
+	currentGroupOffsetMetric = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
-			Name: "yakle_end_offset",
-			Help: "Last committed offset of a specific consumergroup/partition",
+			Name: "yakle_group_topic_partition_current_offset",
+			Help: "Current offset of a given group/topic/partition",
 		},
-		[]string{"topic", "partition", "group"},
+		[]string{"group", "topic", "partition"},
 	)
-	offsetLagMetric = prometheus.NewGaugeVec(
+	offsetGroupLagMetric = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
-			Name: "yakle_offset_lag",
-			Help: "Offset lag of a specific consumergroup/partition",
+			Name: "yakle_group_topic_partition_offset_lag",
+			Help: "Offset lag of a given group/topic/partition",
 		},
-		[]string{"topic", "partition", "group"},
+		[]string{"group", "topic", "partition"},
 	)
-	timeLagMetric = prometheus.NewGaugeVec(
+	timeGroupLagMetric = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
-			Name: "yakle_time_lag",
-			Help: "Time lag of a specific consumergroup/partition",
+			Name: "yakle_group_topic_partition_time_lag",
+			Help: "Time lag of a given group/topic/partition",
 		},
-		[]string{"topic", "partition", "group"},
+		[]string{"group", "topic", "partition"},
 	)
 )
 
@@ -60,10 +60,10 @@ func init() {
 	flag.IntVar(&config.interval, "interval", 30, "interval of lag refresh")
 	log.Formatter = new(logrus.TextFormatter)
 	log.Level = logrus.InfoLevel
-	prometheus.MustRegister(currentOffsetMetric)
-	prometheus.MustRegister(endOffsetMetric)
-	prometheus.MustRegister(offsetLagMetric)
-	prometheus.MustRegister(timeLagMetric)
+	prometheus.MustRegister(latestOffsetMetric)
+	prometheus.MustRegister(currentGroupOffsetMetric)
+	prometheus.MustRegister(offsetGroupLagMetric)
+	prometheus.MustRegister(timeGroupLagMetric)
 }
 
 func main() {
@@ -76,17 +76,19 @@ func main() {
 	go func() {
 		ticker := time.NewTicker(time.Duration(config.interval) * time.Second)
 		for range ticker.C {
+			log.Infof("getLag started for topic: %s, group: %s\n", config.topic, config.group)
 			ofs, err := lag.GetLag(config.brokers, config.topic, config.group)
 			if err != nil {
 				log.Errorf("getLag failed : %v", err)
 				continue
 			}
+			log.Infof("getLag ended for topic: %s, group: %s\n", config.topic, config.group)
 			for p, of := range ofs {
-				log.Infof("get: %d %d %d %d %v\n", p, of.End, of.Current, of.OffsetLag, of.TimeLag)
-				currentOffsetMetric.WithLabelValues(config.topic, strconv.Itoa(int(p)), config.group).Set(float64(of.Current))
-				endOffsetMetric.WithLabelValues(config.topic, strconv.Itoa(int(p)), config.group).Set(float64(of.End))
-				offsetLagMetric.WithLabelValues(config.topic, strconv.Itoa(int(p)), config.group).Set(float64(of.OffsetLag))
-				timeLagMetric.WithLabelValues(config.topic, strconv.Itoa(int(p)), config.group).Set(float64(of.TimeLag/time.Millisecond))
+				log.Debugf("getLag partition: %d, latest: %d, current: %d, offsetlag: %d, timelag: %v\n", p, of.Latest, of.Current, of.OffsetLag, of.TimeLag)
+				latestOffsetMetric.WithLabelValues(config.topic, strconv.Itoa(int(p))).Set(float64(of.Latest))
+				currentGroupOffsetMetric.WithLabelValues(config.group, config.topic, strconv.Itoa(int(p))).Set(float64(of.Current))
+				offsetGroupLagMetric.WithLabelValues(config.group, config.topic, strconv.Itoa(int(p))).Set(float64(of.OffsetLag))
+				timeGroupLagMetric.WithLabelValues(config.group, config.topic, strconv.Itoa(int(p))).Set(float64(of.TimeLag/time.Millisecond))
 			}
 		}
 	}()
