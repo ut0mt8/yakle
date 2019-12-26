@@ -33,6 +33,7 @@ The big plus compared to other exporter is that yakle reports not only offset la
 
 | Metric | Description |
 | --- | --- |
-| `yakle_topic_partition_latest_offset{{topic, partition}` | Latest known commited offset for this partition. |
+| `yakle_topic_partition_newest_offset{{topic, partition}` | Latest known commited offset for this partition. |
+| `yakle_topic_partition_oldest_offset{{topic, partition}` | Oldest offset available for this partition. |
 
 
