@@ -1,29 +1,47 @@
 package main
 
 import (
-	"fmt"
 	"github.com/namsral/flag"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/sirupsen/logrus"
-	"github.com/ut0mt8/kalag/lag"
+	"github.com/ut0mt8/yakle/metrics"
 	"net/http"
 	"net/http/pprof"
-	"os"
 	"strconv"
 	"time"
 )
 
 type Config struct {
+	brokers  string
 	laddr    string
 	mpath    string
-	brokers  string
-	topic    string
-	group    string
 	interval int
+	debug    bool
 }
 
 var (
+	leaderMetric = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "yakle_topic_partition_leader",
+			Help: "Leader Broker ID of a given topic/partition",
+		},
+		[]string{"topic", "partition"},
+	)
+	replicasMetric = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "yakle_topic_partition_replicas",
+			Help: "Number of replicas of a given topic/partition",
+		},
+		[]string{"topic", "partition"},
+	)
+	replicasInsyncMetric = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "yakle_topic_partition_isr",
+			Help: "Number of in-sync replicas of a given topic/partition",
+		},
+		[]string{"topic", "partition"},
+	)
 	oldestOffsetMetric = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Name: "yakle_topic_partition_oldest_offset",
@@ -65,14 +83,15 @@ var config Config
 var log = logrus.New()
 
 func init() {
+	flag.StringVar(&config.brokers, "brokers", "localhost:9092", "brokers to connect on")
 	flag.StringVar(&config.laddr, "listen-address", ":8080", "host:port to listen on")
 	flag.StringVar(&config.mpath, "metric-path", "/metrics", "path exposing metrics")
-	flag.StringVar(&config.brokers, "brokers", "localhost:9092", "brokers to connect on")
-	flag.StringVar(&config.topic, "topic", "", "topic to check")
-	flag.StringVar(&config.group, "group", "", "group to check")
-	flag.IntVar(&config.interval, "interval", 30, "interval of lag refresh")
-	log.Formatter = new(logrus.TextFormatter)
+	flag.IntVar(&config.interval, "interval", 10, "interval of lag refresh")
+	flag.BoolVar(&config.debug, "debug", false, "enable debug logging")
 	log.Level = logrus.InfoLevel
+	prometheus.MustRegister(leaderMetric)
+	prometheus.MustRegister(replicasMetric)
+	prometheus.MustRegister(replicasInsyncMetric)
 	prometheus.MustRegister(oldestOffsetMetric)
 	prometheus.MustRegister(newestOffsetMetric)
 	prometheus.MustRegister(currentGroupOffsetMetric)
@@ -83,28 +102,66 @@ func init() {
 func main() {
 
 	flag.Parse()
-	if config.topic == "" || config.group == "" {
-		fmt.Println("-topic and -group options are required")
-		os.Exit(2)
+	if config.debug {
+		log.SetLevel(logrus.DebugLevel)
 	}
 
 	go func() {
 		ticker := time.NewTicker(time.Duration(config.interval) * time.Second)
 		for range ticker.C {
-			log.Infof("getLag started for topic: %s, group: %s\n", config.topic, config.group)
-			ofs, err := lag.GetLag(config.brokers, config.topic, config.group)
+			topics, err := metrics.GetTopics(config.brokers)
 			if err != nil {
-				log.Errorf("getLag failed : %v", err)
+				log.Errorf("getTopics() failed: %v", err)
 				continue
 			}
-			log.Infof("getLag ended for topic: %s, group: %s\n", config.topic, config.group)
-			for p, of := range ofs {
-				log.Debugf("getLag partition: %d, newest: %d, current: %d, offsetlag: %d, timelag: %v\n", p, of.Newest, of.Current, of.OffsetLag, of.TimeLag)
-				oldestOffsetMetric.WithLabelValues(config.topic, strconv.Itoa(int(p))).Set(float64(of.Oldest))
-				newestOffsetMetric.WithLabelValues(config.topic, strconv.Itoa(int(p))).Set(float64(of.Newest))
-				currentGroupOffsetMetric.WithLabelValues(config.group, config.topic, strconv.Itoa(int(p))).Set(float64(of.Current))
-				offsetGroupLagMetric.WithLabelValues(config.group, config.topic, strconv.Itoa(int(p))).Set(float64(of.OffsetLag))
-				timeGroupLagMetric.WithLabelValues(config.group, config.topic, strconv.Itoa(int(p))).Set(float64(of.TimeLag / time.Millisecond))
+
+			groups, err := metrics.GetGroups(config.brokers)
+			if err != nil {
+				log.Errorf("getGroups() failed: %v", err)
+				continue
+			}
+
+			for topic := range topics {
+				// compute topic metrics
+				log.Infof("getTopicMetrics() started for topic: %s\n", topic)
+				tms, err := metrics.GetTopicMetrics(config.brokers, topic)
+				if err != nil {
+					log.Errorf("getTopicMetrics() failed: %v", err)
+					continue
+				}
+				log.Infof("getTopicMetrics() ended for topic: %s\n", topic)
+				for p, tm := range tms {
+					log.Debugf("getTopicMetrics() topic: %s, part: %d, leader: %d, replicas: %d, isr: %d, oldest: %d, newest: %d\n",
+						topic, p, tm.Leader, tm.Replicas, tm.InSyncReplicas, tm.Oldest, tm.Newest)
+					leaderMetric.WithLabelValues(topic, strconv.Itoa(int(p))).Set(float64(tm.Leader))
+					replicasMetric.WithLabelValues(topic, strconv.Itoa(int(p))).Set(float64(tm.Replicas))
+					replicasInsyncMetric.WithLabelValues(topic, strconv.Itoa(int(p))).Set(float64(tm.InSyncReplicas))
+					oldestOffsetMetric.WithLabelValues(topic, strconv.Itoa(int(p))).Set(float64(tm.Oldest))
+					newestOffsetMetric.WithLabelValues(topic, strconv.Itoa(int(p))).Set(float64(tm.Newest))
+				}
+
+				// compute groups metrics
+				for group := range groups {
+					consummed, err := metrics.GetTopicConsummed(config.brokers, topic, group)
+					if !consummed || err != nil {
+						log.Debugf("skip topic: %s, group: %s\n", topic, group)
+						continue
+					}
+					log.Infof("getGroupMetrics() started for topic: %s, group: %s\n", topic, group)
+					gms, err := metrics.GetGroupMetrics(config.brokers, topic, group, tms)
+					if err != nil {
+						log.Errorf("getGroupMetrics() failed: %v", err)
+						continue
+					}
+					log.Infof("getGroupMetrics() ended for topic: %s, group: %s\n", topic, group)
+					for p, gm := range gms {
+						log.Debugf("getGroupMetrics() topic: %s, group: %s, part: %d, current: %d, olag: %d\n",
+							topic, group, p, gm.Current, gm.OffsetLag)
+						currentGroupOffsetMetric.WithLabelValues(group, topic, strconv.Itoa(int(p))).Set(float64(gm.Current))
+						offsetGroupLagMetric.WithLabelValues(group, topic, strconv.Itoa(int(p))).Set(float64(gm.OffsetLag))
+						timeGroupLagMetric.WithLabelValues(group, topic, strconv.Itoa(int(p))).Set(float64(gm.TimeLag / time.Millisecond))
+					}
+				}
 			}
 		}
 	}()
