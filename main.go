@@ -8,6 +8,7 @@ import (
 	"github.com/ut0mt8/yakle/metrics"
 	"net/http"
 	"net/http/pprof"
+	"regexp"
 	"strconv"
 	"time"
 )
@@ -16,6 +17,7 @@ type Config struct {
 	brokers  string
 	laddr    string
 	mpath    string
+	filter   string
 	interval int
 	debug    bool
 }
@@ -86,6 +88,7 @@ func init() {
 	flag.StringVar(&config.brokers, "brokers", "localhost:9092", "brokers to connect on")
 	flag.StringVar(&config.laddr, "listen-address", ":8080", "host:port to listen on")
 	flag.StringVar(&config.mpath, "metric-path", "/metrics", "path exposing metrics")
+	flag.StringVar(&config.filter, "filter", "^__.*", "regex for filtering topics")
 	flag.IntVar(&config.interval, "interval", 10, "interval of lag refresh")
 	flag.BoolVar(&config.debug, "debug", false, "enable debug logging")
 	log.Level = logrus.InfoLevel
@@ -106,6 +109,8 @@ func main() {
 		log.SetLevel(logrus.DebugLevel)
 	}
 
+	tfilter := regexp.MustCompile(config.filter)
+
 	go func() {
 		ticker := time.NewTicker(time.Duration(config.interval) * time.Second)
 		for range ticker.C {
@@ -122,7 +127,11 @@ func main() {
 			}
 
 			for topic := range topics {
-				// compute topic metrics
+				if tfilter.MatchString(topic) {
+					log.Debugf("skip topic: %s\n", topic)
+					continue
+				}
+
 				log.Infof("getTopicMetrics() started for topic: %s\n", topic)
 				tms, err := metrics.GetTopicMetrics(config.brokers, topic)
 				if err != nil {
@@ -140,7 +149,6 @@ func main() {
 					newestOffsetMetric.WithLabelValues(topic, strconv.Itoa(int(p))).Set(float64(tm.Newest))
 				}
 
-				// compute groups metrics
 				for group := range groups {
 					consummed, err := metrics.GetTopicConsummed(config.brokers, topic, group)
 					if !consummed || err != nil {
