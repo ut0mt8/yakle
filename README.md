@@ -6,6 +6,22 @@ Kafka lag exporter are either broken, slow or only send metrics to influx. Why n
 This is inspired by burrowx, but simplified with the more simple and robust logic I could think of.
 Yakle is fast cause it use only low level api. The big feature compared to other exporter is that yakle reports not only offset lag but also the time lag, and not interpolated one.
 
+## Usage
+
+```
+Usage of ./yakle:
+  -brokers="localhost:9092": brokers to connect on
+  -debug=false: enable debug logging
+  -filter="^__.*": regex for filtering topics
+  -interval=10: interval of lag refresh
+  -listen-address=":8080": host:port to listen on
+  -metric-path="/metrics": path exposing metrics
+```
+
+Flags can be passed as environment variables. 
+
+Docker image exist at dockerhub `ut0mt8/yakle:latest`
+
 ## Exposed metrics
 
 ### Labels
