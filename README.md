@@ -1,5 +1,4 @@
-# yakle
-Yet Another Kafka Lag Exporter
+# YAKLE (Yet Another Kafka Lag Exporter)
 
 Kafka lag exporter are either broken, slow or only send metrics to influx. Why not writing my own ? 
 
