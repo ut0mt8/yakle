@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"github.com/namsral/flag"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -47,7 +48,7 @@ var (
 	oldestOffsetMetric = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Name: "yakle_topic_partition_oldest_offset",
-			Help: "Oldest avalaible offset of a given topic/partition",
+			Help: "Oldest available offset of a given topic/partition",
 		},
 		[]string{"topic", "partition"},
 	)
@@ -132,15 +133,15 @@ func main() {
 					continue
 				}
 
-				log.Infof("getTopicMetrics() started for topic: %s\n", topic)
+				log.Infof("getTopicMetrics() started for topic: %s", topic)
 				tms, err := metrics.GetTopicMetrics(config.brokers, topic)
 				if err != nil {
 					log.Errorf("getTopicMetrics() failed: %v", err)
 					continue
 				}
-				log.Infof("getTopicMetrics() ended for topic: %s\n", topic)
+				log.Infof("getTopicMetrics() ended for topic: %s", topic)
 				for p, tm := range tms {
-					log.Debugf("getTopicMetrics() topic: %s, part: %d, leader: %d, replicas: %d, isr: %d, oldest: %d, newest: %d\n",
+					log.Debugf("getTopicMetrics() topic: %s, part: %d, leader: %d, replicas: %d, isr: %d, oldest: %d, newest: %d",
 						topic, p, tm.Leader, tm.Replicas, tm.InSyncReplicas, tm.Oldest, tm.Newest)
 					leaderMetric.WithLabelValues(topic, strconv.Itoa(int(p))).Set(float64(tm.Leader))
 					replicasMetric.WithLabelValues(topic, strconv.Itoa(int(p))).Set(float64(tm.Replicas))
@@ -152,18 +153,18 @@ func main() {
 				for group := range groups {
 					consummed, err := metrics.GetTopicConsummed(config.brokers, topic, group)
 					if !consummed || err != nil {
-						log.Debugf("skip topic: %s, group: %s\n", topic, group)
+						log.Debugf("skip topic: %s, group: %s", topic, group)
 						continue
 					}
-					log.Infof("getGroupMetrics() started for topic: %s, group: %s\n", topic, group)
+					log.Infof("getGroupMetrics() started for topic: %s, group: %s", topic, group)
 					gms, err := metrics.GetGroupMetrics(config.brokers, topic, group, tms)
 					if err != nil {
 						log.Errorf("getGroupMetrics() failed: %v", err)
 						continue
 					}
-					log.Infof("getGroupMetrics() ended for topic: %s, group: %s\n", topic, group)
+					log.Infof("getGroupMetrics() ended for topic: %s, group: %s", topic, group)
 					for p, gm := range gms {
-						log.Debugf("getGroupMetrics() topic: %s, group: %s, part: %d, current: %d, olag: %d\n",
+						log.Debugf("getGroupMetrics() topic: %s, group: %s, part: %d, current: %d, olag: %d",
 							topic, group, p, gm.Current, gm.OffsetLag)
 						currentGroupOffsetMetric.WithLabelValues(group, topic, strconv.Itoa(int(p))).Set(float64(gm.Current))
 						offsetGroupLagMetric.WithLabelValues(group, topic, strconv.Itoa(int(p))).Set(float64(gm.OffsetLag))
@@ -175,6 +176,9 @@ func main() {
 	}()
 
 	http.Handle(config.mpath, promhttp.Handler())
+	http.HandleFunc("/health", func(w http.ResponseWriter, _ *http.Request) {
+		fmt.Fprint(w, "OK")
+	})
 	http.Handle("/debug/pprof/goroutine", pprof.Handler("goroutine"))
 	log.Infof("beginning to serve on %s, metrics on %s", config.laddr, config.mpath)
 	http.ListenAndServe(config.laddr, nil)
