@@ -21,5 +21,5 @@ deps:
 fmt:
 	go fmt ./...
 docker:
-	docker build --build-arg VERSION=${VERSION} --build-arg BUILD=${BUILD} -t $(IMAGE_NAME):latest .
-	docker push $(DOCKER_USER)/$(IMAGE_NAME):latest
+	docker build --build-arg VERSION=${VERSION} --build-arg BUILD=${BUILD} -t $(DOCKER_USER)/$(IMAGE_NAME):$(VERSION) .
+	docker push $(DOCKER_USER)/$(IMAGE_NAME):$(VERSION)
