@@ -8,7 +8,7 @@ import (
 	"github.com/sirupsen/logrus"
 	"github.com/ut0mt8/yakle/metrics"
 	"net/http"
-	"net/http/pprof"
+	//"net/http/pprof"
 	"regexp"
 	"strconv"
 	"time"
@@ -24,6 +24,8 @@ type Config struct {
 }
 
 var (
+	version      string
+	build        string
 	leaderMetric = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Name: "yakle_topic_partition_leader",
@@ -179,7 +181,8 @@ func main() {
 	http.HandleFunc("/health", func(w http.ResponseWriter, _ *http.Request) {
 		fmt.Fprint(w, "OK")
 	})
-	http.Handle("/debug/pprof/goroutine", pprof.Handler("goroutine"))
+	//http.Handle("/debug/pprof/goroutine", pprof.Handler("goroutine"))
+	log.Infof("yalke version=%s build=%s starting", version, build)
 	log.Infof("beginning to serve on %s, metrics on %s", config.laddr, config.mpath)
 	http.ListenAndServe(config.laddr, nil)
 }
