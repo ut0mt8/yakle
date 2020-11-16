@@ -1,5 +1,5 @@
 # build image
-FROM golang:1.14-alpine as builder
+FROM golang:1.15-alpine as builder
 
 ARG VERSION
 ARG BUILD

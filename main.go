@@ -5,16 +5,16 @@ import (
 	"github.com/namsral/flag"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
-	"github.com/sirupsen/logrus"
+	log "github.com/sirupsen/logrus"
 	"github.com/ut0mt8/yakle/metrics"
 	"net/http"
-	//"net/http/pprof"
+	"net/http/pprof"
 	"regexp"
 	"strconv"
 	"time"
 )
 
-type Config struct {
+type config struct {
 	brokers  string
 	laddr    string
 	mpath    string
@@ -57,7 +57,7 @@ var (
 	newestOffsetMetric = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Name: "yakle_topic_partition_newest_offset",
-			Help: "Last commited offset of a given topic/partition",
+			Help: "Last committed offset of a given topic/partition",
 		},
 		[]string{"topic", "partition"},
 	)
@@ -84,17 +84,22 @@ var (
 	)
 )
 
-var config Config
-var log = logrus.New()
+func main() {
 
-func init() {
-	flag.StringVar(&config.brokers, "brokers", "localhost:9092", "brokers to connect on")
-	flag.StringVar(&config.laddr, "listen-address", ":8080", "host:port to listen on")
-	flag.StringVar(&config.mpath, "metric-path", "/metrics", "path exposing metrics")
-	flag.StringVar(&config.filter, "filter", "^__.*", "regex for filtering topics")
-	flag.IntVar(&config.interval, "interval", 10, "interval of lag refresh")
-	flag.BoolVar(&config.debug, "debug", false, "enable debug logging")
-	log.Level = logrus.InfoLevel
+	var conf config
+	flag.StringVar(&conf.brokers, "brokers", "localhost:9092", "brokers to connect on")
+	flag.StringVar(&conf.laddr, "listen-address", ":8080", "host:port to listen on")
+	flag.StringVar(&conf.mpath, "metric-path", "/metrics", "path exposing metrics")
+	flag.StringVar(&conf.filter, "filter", "^__.*", "regex for filtering topics")
+	flag.IntVar(&conf.interval, "interval", 10, "interval of lag refresh")
+	flag.BoolVar(&conf.debug, "debug", false, "enable debug logging")
+	flag.Parse()
+
+	if conf.debug {
+		log.SetLevel(log.DebugLevel)
+		metrics.Debug = true
+	}
+
 	prometheus.MustRegister(leaderMetric)
 	prometheus.MustRegister(replicasMetric)
 	prometheus.MustRegister(replicasInsyncMetric)
@@ -103,27 +108,19 @@ func init() {
 	prometheus.MustRegister(currentGroupOffsetMetric)
 	prometheus.MustRegister(offsetGroupLagMetric)
 	prometheus.MustRegister(timeGroupLagMetric)
-}
 
-func main() {
-
-	flag.Parse()
-	if config.debug {
-		log.SetLevel(logrus.DebugLevel)
-	}
-
-	tfilter := regexp.MustCompile(config.filter)
+	tfilter := regexp.MustCompile(conf.filter)
 
 	go func() {
-		ticker := time.NewTicker(time.Duration(config.interval) * time.Second)
+		ticker := time.NewTicker(time.Duration(conf.interval) * time.Second)
 		for range ticker.C {
-			topics, err := metrics.GetTopics(config.brokers)
+			topics, err := metrics.GetTopics(conf.brokers)
 			if err != nil {
 				log.Errorf("getTopics() failed: %v", err)
 				continue
 			}
 
-			groups, err := metrics.GetGroups(config.brokers)
+			groups, err := metrics.GetGroups(conf.brokers)
 			if err != nil {
 				log.Errorf("getGroups() failed: %v", err)
 				continue
@@ -131,12 +128,12 @@ func main() {
 
 			for topic := range topics {
 				if tfilter.MatchString(topic) {
-					log.Debugf("skip topic: %s\n", topic)
+					log.Debugf("skip topic: %s", topic)
 					continue
 				}
 
 				log.Infof("getTopicMetrics() started for topic: %s", topic)
-				tms, err := metrics.GetTopicMetrics(config.brokers, topic)
+				tms, err := metrics.GetTopicMetrics(conf.brokers, topic)
 				if err != nil {
 					log.Errorf("getTopicMetrics() failed: %v", err)
 					continue
@@ -153,13 +150,13 @@ func main() {
 				}
 
 				for group := range groups {
-					consummed, err := metrics.GetTopicConsummed(config.brokers, topic, group)
+					consummed, err := metrics.GetTopicConsummed(conf.brokers, topic, group)
 					if !consummed || err != nil {
 						log.Debugf("skip topic: %s, group: %s", topic, group)
 						continue
 					}
 					log.Infof("getGroupMetrics() started for topic: %s, group: %s", topic, group)
-					gms, err := metrics.GetGroupMetrics(config.brokers, topic, group, tms)
+					gms, err := metrics.GetGroupMetrics(conf.brokers, topic, group, tms)
 					if err != nil {
 						log.Errorf("getGroupMetrics() failed: %v", err)
 						continue
@@ -177,12 +174,12 @@ func main() {
 		}
 	}()
 
-	http.Handle(config.mpath, promhttp.Handler())
+	http.Handle(conf.mpath, promhttp.Handler())
 	http.HandleFunc("/health", func(w http.ResponseWriter, _ *http.Request) {
 		fmt.Fprint(w, "OK")
 	})
-	//http.Handle("/debug/pprof/goroutine", pprof.Handler("goroutine"))
+	http.Handle("/debug/pprof/goroutine", pprof.Handler("goroutine"))
 	log.Infof("yalke version=%s build=%s starting", version, build)
-	log.Infof("beginning to serve on %s, metrics on %s", config.laddr, config.mpath)
-	http.ListenAndServe(config.laddr, nil)
+	log.Infof("beginning to serve on %s, metrics on %s", conf.laddr, conf.mpath)
+	log.Fatal(http.ListenAndServe(conf.laddr, nil))
 }

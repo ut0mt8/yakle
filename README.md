@@ -1,9 +1,10 @@
 # YAKLE (Yet Another Kafka Lag Exporter)
 
-Kafka lag exporter are either broken, slow or only send metrics to influx. Why not writing my own ? 
+Kafka lag exporter are either broken, slow or only send metrics to influx. Why not writing my own one? 
 
 This is inspired by burrowx, but simplified with the more simple and robust logic I could think of.
-Yakle is fast cause it use only low level api. The big feature compared to other exporter is that yakle reports not only offset lag but also the time lag, and not interpolated one.
+Yakle is fast cause it use only low level kafka api. The main feature compared to other exporters is that yakle reports not only offset lag but also time lag (real time lag, not interpolated)
+Yakle is "production" tested and worked since months in our environment (dozen of kafka clusters, hundred of brokers, and topics with many many partitions)
 
 ## Usage
 
@@ -55,5 +56,8 @@ Docker image exist at dockerhub `ut0mt8/yakle:latest`
 
 
 
+## Todo
 
+ - Add grafana example dashboard
+ - Add unit tests (but mocking kafka brokers is not easy)
 
