@@ -61,6 +61,13 @@ var (
 		},
 		[]string{"topic", "partition"},
 	)
+	oldestTimeMetric = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "yakle_topic_partition_oldest_time",
+			Help: "Time of the oldest available offset of a given topic/partition",
+		},
+		[]string{"topic", "partition"},
+	)
 	currentGroupOffsetMetric = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Name: "yakle_group_topic_partition_current_offset",
@@ -105,6 +112,7 @@ func main() {
 	prometheus.MustRegister(replicasInsyncMetric)
 	prometheus.MustRegister(oldestOffsetMetric)
 	prometheus.MustRegister(newestOffsetMetric)
+	prometheus.MustRegister(oldestTimeMetric)
 	prometheus.MustRegister(currentGroupOffsetMetric)
 	prometheus.MustRegister(offsetGroupLagMetric)
 	prometheus.MustRegister(timeGroupLagMetric)
@@ -147,6 +155,7 @@ func main() {
 					replicasInsyncMetric.WithLabelValues(topic, strconv.Itoa(int(p))).Set(float64(tm.InSyncReplicas))
 					oldestOffsetMetric.WithLabelValues(topic, strconv.Itoa(int(p))).Set(float64(tm.Oldest))
 					newestOffsetMetric.WithLabelValues(topic, strconv.Itoa(int(p))).Set(float64(tm.Newest))
+					oldestTimeMetric.WithLabelValues(topic, strconv.Itoa(int(p))).Set(float64(tm.OldestTime / time.Millisecond))
 				}
 
 				for group := range groups {

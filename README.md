@@ -39,25 +39,25 @@ Docker image exist at dockerhub `ut0mt8/yakle:latest`
 
 | Metric | Description |
 | --- | --- |
-| `yakle_topic_partition_leader{topic, partition}` | Leader Broker ID of a given topic/partition. |
-| `yakle_topic_partition_replicas{topic, partition}` | Number of replicas of a given topic/partition. |
-| `yakle_topic_partition_isr{topic, partition}` | Number of in-sync replicas of a given topic/partition. |
-| `yakle_topic_partition_newest_offset{topic, partition}` | Latest commited offset of a given topic/partition. |
-| `yakle_topic_partition_oldest_offset{topic, partition}` | Oldest offset available of a given topic/partition. |
+| `yakle_topic_partition_leader{topic, partition}` | Leader Broker ID of a given topic/partition |
+| `yakle_topic_partition_replicas{topic, partition}` | Number of replicas of a given topic/partition |
+| `yakle_topic_partition_isr{topic, partition}` | Number of in-sync replicas of a given topic/partition |
+| `yakle_topic_partition_newest_offset{topic, partition}` | Latest commited offset of a given topic/partition |
+| `yakle_topic_partition_oldest_offset{topic, partition}` | Oldest offset available of a given topic/partition |
+| `yakle_topic_partition_oldest_time{topic, partition}` | Timestamp in ms of the oldest offset available of a given topic/partition |
 
 
 #### Consumer group metrics
 
 | Metric | Description |
 | --- | --- |
-| `yakle_group_topic_partition_current_offset{group, topic, partition}` | Current offset of a given group/topic/partition. |
-| `yakle_group_topic_partition_offset_lag{group, topic, partition}` | Offset lag of a given group/topic/partition. |
-| `yakle_group_topic_partition_time_lag{group, topic, partition}` | Time lag (in ms) of a given group/topic/partition. |
+| `yakle_group_topic_partition_current_offset{group, topic, partition}` | Current offset of a given group/topic/partition |
+| `yakle_group_topic_partition_offset_lag{group, topic, partition}` | Offset lag of a given group/topic/partition |
+| `yakle_group_topic_partition_time_lag{group, topic, partition}` | Time lag (in ms) of a given group/topic/partition |
 
 
 
 ## Todo
 
- - Add grafana example dashboard
  - Add unit tests (but mocking kafka brokers is not easy)
 
