@@ -1,4 +1,3 @@
-export GO111MODULE=on
 DOCKER_USER=ut0mt8
 IMAGE_NAME=yakle
 BINARY_NAME=yakle
@@ -8,16 +7,18 @@ BUILD=`date +%FT%T%z`
 
 LDFLAGS=-ldflags "-X main.version=${VERSION} -X main.build=${BUILD}"
 
-all: deps fmt test build
+all: deps fmt test vet build
 build:
 	go build ${LDFLAGS} -o $(BINARY_NAME) -v
+vet:
+	go vet
 test:
 	go test -v ./...
 clean:
 	go clean
 	rm -f $(BINARY_NAME)
 deps:
-	go get ./...
+	go mod download
 fmt:
 	go fmt ./...
 docker:

@@ -56,6 +56,7 @@ func (e *topicGroupPartError) Error() string {
 
 type TopicMetrics struct {
 	Leader         int32
+	LeaderISP      int
 	Replicas       int
 	InSyncReplicas int
 	Newest         int64
@@ -230,6 +231,11 @@ func GetTopicMetrics(brokers string, topic string) (map[int32]TopicMetrics, erro
 			}
 		}
 
+		var leaderISP int = 0
+		if len(isr) != 0 && isr[0] == leader.ID() {
+			leaderISP = 1
+		}
+
 		var oldest, msgnumber int64 = -1, 0
 
 		newest, err := client.GetOffset(topic, part, sarama.OffsetNewest)
@@ -272,6 +278,7 @@ func GetTopicMetrics(brokers string, topic string) (map[int32]TopicMetrics, erro
 
 		metrics[part] = TopicMetrics{
 			Leader:         leader.ID(),
+			LeaderISP:      leaderISP,
 			Replicas:       len(replicas),
 			InSyncReplicas: len(isr),
 			Newest:         newest,

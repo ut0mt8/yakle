@@ -1,10 +1,11 @@
 # YAKLE (Yet Another Kafka Lag Exporter)
 
-Kafka lag exporter are either broken, slow or only send metrics to influx. Why not writing my own one? 
+Kafka lag exporter are either broken, slow or only send metrics to influx.
+This is my attempt to write my own. This is inspired by burrowx, but simplified with the more simple and robust logic I could think of.
+Yakle basically export the same sets of metrics as danielqsj/kafka_exporter but the logic behind is very different. 
 
-This is inspired by burrowx, but simplified with the more simple and robust logic I could think of.
-Yakle is fast cause it use only low level kafka api. The main feature compared to other exporters is that yakle reports not only offset lag but also time lag (real time lag, not interpolated)
-Yakle is "production" tested and worked since months in our environment (dozen of kafka clusters, hundred of brokers, and topics with many many partitions)
+Yakle is fast cause it use only low level kafka api. The main feature compared to other exporters is that yakle reports not only offset lag but also time lag (real time lag, not interpolated).
+Yakle is "production" tested and worked since months in our environment (dozen of kafka clusters, hundred of brokers/topics with many partitions)
 
 ## Usage
 
@@ -39,21 +40,23 @@ Docker image exist at dockerhub `ut0mt8/yakle:latest`
 
 | Metric | Description |
 | --- | --- |
-| `yakle_topic_partition_leader{topic, partition}` | Leader Broker ID of a given topic/partition |
-| `yakle_topic_partition_replicas{topic, partition}` | Number of replicas of a given topic/partition |
-| `yakle_topic_partition_isr{topic, partition}` | Number of in-sync replicas of a given topic/partition |
-| `yakle_topic_partition_newest_offset{topic, partition}` | Latest commited offset of a given topic/partition |
-| `yakle_topic_partition_oldest_offset{topic, partition}` | Oldest offset available of a given topic/partition |
-| `yakle_topic_partition_oldest_time{topic, partition}` | Timestamp in ms of the oldest offset available of a given topic/partition |
+| `kafka_topic_partition_leader{cluster, topic, partition}` | Leader Broker ID for a given topic/partition |
+| `kafka_topic_partition_leader_is_preferred{cluster, topic, partition}` | Boolean indicating if the leader use its preferred broker for a given topic/partition |
+| `kafka_topic_partition_replicas{cluster, topic, partition}` | Number of replicas for a given topic/partition |
+| `kafka_topic_partition_isr{cluster, topic, partition}` | Number of in-sync replicas for a given topic/partition |
+| `kafka_topic_partition_under_replicated{cluster, topic, partition}` | Boolean indicating if all replicas are in sync for a given topic/partition |
+| `kafka_topic_partition_newest_offset{cluster, topic, partition}` | Latest commited offset for a given topic/partition |
+| `kafka_topic_partition_oldest_offset{cluster, topic, partition}` | Oldest offset available for a given topic/partition |
+| `kafka_topic_partition_oldest_time{cluster, topic, partition}` | Timestamp in ms of the oldest offset available for a given topic/partition |
 
 
 #### Consumer group metrics
 
 | Metric | Description |
 | --- | --- |
-| `yakle_group_topic_partition_current_offset{group, topic, partition}` | Current offset of a given group/topic/partition |
-| `yakle_group_topic_partition_offset_lag{group, topic, partition}` | Offset lag of a given group/topic/partition |
-| `yakle_group_topic_partition_time_lag{group, topic, partition}` | Time lag (in ms) of a given group/topic/partition |
+| `kafka_group_topic_partition_current_offset{cluster, group, topic, partition}` | Current offset for a given group/topic/partition |
+| `kafka_group_topic_partition_offset_lag{cluster, group, topic, partition}` | Offset lag for a given group/topic/partition |
+| `kafka_group_topic_partition_time_lag{cluster, group, topic, partition}` | Time lag (in ms) for a given group/topic/partition |
 
 
 

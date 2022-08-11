@@ -2,23 +2,26 @@ package main
 
 import (
 	"fmt"
-	"github.com/namsral/flag"
-	"github.com/prometheus/client_golang/prometheus"
-	"github.com/prometheus/client_golang/prometheus/promhttp"
-	log "github.com/sirupsen/logrus"
-	"github.com/ut0mt8/yakle/metrics"
 	"net/http"
 	"net/http/pprof"
 	"regexp"
 	"strconv"
 	"time"
+
+	"github.com/namsral/flag"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
+	log "github.com/sirupsen/logrus"
+
+	"yakle/metrics"
 )
 
 type config struct {
 	brokers  string
 	laddr    string
 	mpath    string
-	filter   string
+	clabel   string
+	tfilter  string
 	interval int
 	debug    bool
 }
@@ -29,77 +32,91 @@ var (
 	leaderMetric = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Name: "yakle_topic_partition_leader",
-			Help: "Leader Broker ID of a given topic/partition",
+			Help: "Leader Broker ID for a given topic/partition",
 		},
-		[]string{"topic", "partition"},
+		[]string{"cluster", "topic", "partition"},
+	)
+	leaderIsPreferredMetric = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "kafka_topic_partition_leader_is_preferred",
+			Help: "Boolean indicating if the leader use its preferred broker for a given topic/partition",
+		},
+		[]string{"cluster", "topic", "partition"},
 	)
 	replicasMetric = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
-			Name: "yakle_topic_partition_replicas",
-			Help: "Number of replicas of a given topic/partition",
+			Name: "kafka_topic_partition_replicas",
+			Help: "Number of replicas for a given topic/partition",
 		},
-		[]string{"topic", "partition"},
+		[]string{"cluster", "topic", "partition"},
 	)
 	replicasInsyncMetric = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
-			Name: "yakle_topic_partition_isr",
-			Help: "Number of in-sync replicas of a given topic/partition",
+			Name: "kafka_topic_partition_isr",
+			Help: "Number of in-sync replicas for a given topic/partition",
 		},
-		[]string{"topic", "partition"},
+		[]string{"cluster", "topic", "partition"},
+	)
+	underReplicatedMetric = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "kafka_topic_partition_under_replicated",
+			Help: "Boolean indicating if all replicas are in sync for a given topic/partition",
+		},
+		[]string{"cluster", "topic", "partition"},
 	)
 	oldestOffsetMetric = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
-			Name: "yakle_topic_partition_oldest_offset",
-			Help: "Oldest available offset of a given topic/partition",
+			Name: "kafka_topic_partition_oldest_offset",
+			Help: "Oldest available offset for a given topic/partition",
 		},
-		[]string{"topic", "partition"},
+		[]string{"cluster", "topic", "partition"},
 	)
 	newestOffsetMetric = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
-			Name: "yakle_topic_partition_newest_offset",
-			Help: "Last committed offset of a given topic/partition",
+			Name: "kafka_topic_partition_newest_offset",
+			Help: "Last committed offset for a given topic/partition",
 		},
-		[]string{"topic", "partition"},
+		[]string{"cluster", "topic", "partition"},
 	)
 	oldestTimeMetric = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
-			Name: "yakle_topic_partition_oldest_time",
-			Help: "Time of the oldest available offset of a given topic/partition",
+			Name: "kafka_topic_partition_oldest_time",
+			Help: "Time of the oldest available offset for a given topic/partition",
 		},
-		[]string{"topic", "partition"},
+		[]string{"cluster", "topic", "partition"},
 	)
 	currentGroupOffsetMetric = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
-			Name: "yakle_group_topic_partition_current_offset",
-			Help: "Current offset of a given group/topic/partition",
+			Name: "kafka_group_topic_partition_current_offset",
+			Help: "Current offset for a given group/topic/partition",
 		},
-		[]string{"group", "topic", "partition"},
+		[]string{"cluster", "group", "topic", "partition"},
 	)
 	offsetGroupLagMetric = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
-			Name: "yakle_group_topic_partition_offset_lag",
-			Help: "Offset lag of a given group/topic/partition",
+			Name: "kafka_group_topic_partition_offset_lag",
+			Help: "Offset lag for a given group/topic/partition",
 		},
-		[]string{"group", "topic", "partition"},
+		[]string{"cluster", "group", "topic", "partition"},
 	)
 	timeGroupLagMetric = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
-			Name: "yakle_group_topic_partition_time_lag",
-			Help: "Time lag of a given group/topic/partition",
+			Name: "kafka_group_topic_partition_time_lag",
+			Help: "Time lag for a given group/topic/partition",
 		},
-		[]string{"group", "topic", "partition"},
+		[]string{"cluster", "group", "topic", "partition"},
 	)
 )
 
 func main() {
-
 	var conf config
-	flag.StringVar(&conf.brokers, "brokers", "localhost:9092", "brokers to connect on")
-	flag.StringVar(&conf.laddr, "listen-address", ":8080", "host:port to listen on")
-	flag.StringVar(&conf.mpath, "metric-path", "/metrics", "path exposing metrics")
-	flag.StringVar(&conf.filter, "filter", "^__.*", "regex for filtering topics")
-	flag.IntVar(&conf.interval, "interval", 10, "interval of lag refresh")
-	flag.BoolVar(&conf.debug, "debug", false, "enable debug logging")
+	flag.StringVar(&conf.brokers, "kafka.brokers", "localhost:9092", "address list (host:port) of kafka brokers to connect to")
+	flag.StringVar(&conf.laddr, "web.listen-address", ":8080", "address (host:port) to listen on for telemetry")
+	flag.StringVar(&conf.mpath, "web.telemetry-path", "/metrics", "path under which to expose metrics")
+	flag.StringVar(&conf.clabel, "kafka.label", "kafka-cluster", "kafka cluster name for labeling metrics")
+	flag.StringVar(&conf.tfilter, "topic.filter", "^__.*", "regex for excluding topics")
+	flag.IntVar(&conf.interval, "refresh.interval", 30, "interval for refreshing metrics")
+	flag.BoolVar(&conf.debug, "log.enable-sarama", false, "enable sarama debug logging")
 	flag.Parse()
 
 	if conf.debug {
@@ -108,6 +125,7 @@ func main() {
 	}
 
 	prometheus.MustRegister(leaderMetric)
+	prometheus.MustRegister(leaderIsPreferredMetric)
 	prometheus.MustRegister(replicasMetric)
 	prometheus.MustRegister(replicasInsyncMetric)
 	prometheus.MustRegister(oldestOffsetMetric)
@@ -117,11 +135,14 @@ func main() {
 	prometheus.MustRegister(offsetGroupLagMetric)
 	prometheus.MustRegister(timeGroupLagMetric)
 
-	tfilter := regexp.MustCompile(conf.filter)
+	clabel := conf.clabel
+	tfilter := regexp.MustCompile(conf.tfilter)
 
 	go func() {
 		ticker := time.NewTicker(time.Duration(conf.interval) * time.Second)
 		for range ticker.C {
+			log.Infof("getMetrics fired")
+
 			topics, err := metrics.GetTopics(conf.brokers)
 			if err != nil {
 				log.Errorf("getTopics() failed: %v", err)
@@ -148,14 +169,15 @@ func main() {
 				}
 				log.Infof("getTopicMetrics() ended for topic: %s", topic)
 				for p, tm := range tms {
-					log.Debugf("getTopicMetrics() topic: %s, part: %d, leader: %d, replicas: %d, isr: %d, oldest: %d, newest: %d",
-						topic, p, tm.Leader, tm.Replicas, tm.InSyncReplicas, tm.Oldest, tm.Newest)
-					leaderMetric.WithLabelValues(topic, strconv.Itoa(int(p))).Set(float64(tm.Leader))
-					replicasMetric.WithLabelValues(topic, strconv.Itoa(int(p))).Set(float64(tm.Replicas))
-					replicasInsyncMetric.WithLabelValues(topic, strconv.Itoa(int(p))).Set(float64(tm.InSyncReplicas))
-					oldestOffsetMetric.WithLabelValues(topic, strconv.Itoa(int(p))).Set(float64(tm.Oldest))
-					newestOffsetMetric.WithLabelValues(topic, strconv.Itoa(int(p))).Set(float64(tm.Newest))
-					oldestTimeMetric.WithLabelValues(topic, strconv.Itoa(int(p))).Set(float64(tm.OldestTime / time.Millisecond))
+					log.Debugf("getTopicMetrics() topic: %s, part: %d, leader: %d, isp: %d, replicas: %d, isr: %d, oldest: %d, newest: %d",
+						topic, p, tm.Leader, tm.LeaderISP, tm.Replicas, tm.InSyncReplicas, tm.Oldest, tm.Newest)
+					leaderMetric.WithLabelValues(clabel, topic, strconv.Itoa(int(p))).Set(float64(tm.Leader))
+					leaderIsPreferredMetric.WithLabelValues(clabel, topic, strconv.Itoa(int(p))).Set(float64(tm.LeaderISP))
+					replicasMetric.WithLabelValues(clabel, topic, strconv.Itoa(int(p))).Set(float64(tm.Replicas))
+					replicasInsyncMetric.WithLabelValues(clabel, topic, strconv.Itoa(int(p))).Set(float64(tm.InSyncReplicas))
+					oldestOffsetMetric.WithLabelValues(clabel, topic, strconv.Itoa(int(p))).Set(float64(tm.Oldest))
+					newestOffsetMetric.WithLabelValues(clabel, topic, strconv.Itoa(int(p))).Set(float64(tm.Newest))
+					oldestTimeMetric.WithLabelValues(clabel, topic, strconv.Itoa(int(p))).Set(float64(tm.OldestTime / time.Millisecond))
 				}
 
 				for group := range groups {
@@ -174,12 +196,13 @@ func main() {
 					for p, gm := range gms {
 						log.Debugf("getGroupMetrics() topic: %s, group: %s, part: %d, current: %d, olag: %d",
 							topic, group, p, gm.Current, gm.OffsetLag)
-						currentGroupOffsetMetric.WithLabelValues(group, topic, strconv.Itoa(int(p))).Set(float64(gm.Current))
-						offsetGroupLagMetric.WithLabelValues(group, topic, strconv.Itoa(int(p))).Set(float64(gm.OffsetLag))
-						timeGroupLagMetric.WithLabelValues(group, topic, strconv.Itoa(int(p))).Set(float64(gm.TimeLag / time.Millisecond))
+						currentGroupOffsetMetric.WithLabelValues(clabel, group, topic, strconv.Itoa(int(p))).Set(float64(gm.Current))
+						offsetGroupLagMetric.WithLabelValues(clabel, group, topic, strconv.Itoa(int(p))).Set(float64(gm.OffsetLag))
+						timeGroupLagMetric.WithLabelValues(clabel, group, topic, strconv.Itoa(int(p))).Set(float64(gm.TimeLag / time.Millisecond))
 					}
 				}
 			}
+			log.Infof("getMetrics ended")
 		}
 	}()
 
