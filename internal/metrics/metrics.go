@@ -30,6 +30,12 @@ type topicGroupError struct {
 	err       error
 }
 
+type groupError struct {
+	operation string
+	group     string
+	err       error
+}
+
 type topicGroupPartError struct {
 	operation string
 	topic     string
@@ -50,20 +56,25 @@ func (e *topicGroupError) Error() string {
 	return fmt.Sprintf("[%s](topic: %s, group: %s): %v", e.operation, e.topic, e.group, e.err)
 }
 
+func (e *groupError) Error() string {
+	return fmt.Sprintf("[%s](group: %s): %v", e.operation, e.group, e.err)
+}
+
 func (e *topicGroupPartError) Error() string {
 	return fmt.Sprintf("[%s](topic: %s, group: %s, partition: %d): %v", e.operation, e.topic, e.group, e.partition, e.err)
 }
 
 type TopicMetrics struct {
-	Leader         int32
-	LeaderISP      int
-	Replicas       int
-	InSyncReplicas int
-	Newest         int64
-	Oldest         int64
-	MsgNumber      int64
-	NewestTime     time.Time
-	OldestTime     time.Duration
+	Leader          int32
+	LeaderISP       int
+	Replicas        int
+	InSyncReplicas  int
+	UnderReplicated int
+	Newest          int64
+	Oldest          int64
+	MsgNumber       int64
+	NewestTime      time.Time
+	OldestTime      time.Duration
 }
 
 type GroupMetrics struct {
@@ -85,6 +96,24 @@ func newKafkaConfig() *sarama.Config {
 		sarama.Logger = log.New(os.Stdout, "Debug: ", log.Ltime)
 	}
 	return cfg
+}
+
+func AdminConnect(brokers string) (sarama.ClusterAdmin, error) {
+	cadmin, err := sarama.NewClusterAdmin(strings.Split(brokers, ","), newKafkaConfig())
+	if err != nil {
+		return nil, fmt.Errorf("admin-connect")
+	}
+
+	return cadmin, nil
+}
+
+func ClientConnect(brokers string) (sarama.Client, error) {
+	client, err := sarama.NewClient(strings.Split(brokers, ","), newKafkaConfig())
+	if err != nil {
+		return nil, fmt.Errorf("client-connect")
+	}
+
+	return client, nil
 }
 
 func GetGroupOffset(broker *sarama.Broker, topic string, partition int32, group string) (int64, error) {
@@ -121,13 +150,7 @@ func GetTimestamp(broker *sarama.Broker, topic string, partition int32, offset i
 	return block.Records.RecordBatch.MaxTimestamp, nil
 }
 
-func GetTopics(brokers string) (map[string]sarama.TopicDetail, error) {
-	cadmin, err := sarama.NewClusterAdmin(strings.Split(brokers, ","), newKafkaConfig())
-	if err != nil {
-		return nil, fmt.Errorf("admin-connect")
-	}
-	defer cadmin.Close()
-
+func GetTopics(cadmin sarama.ClusterAdmin) (map[string]sarama.TopicDetail, error) {
 	topics, err := cadmin.ListTopics()
 	if err != nil {
 		return nil, fmt.Errorf("get-topics")
@@ -136,13 +159,7 @@ func GetTopics(brokers string) (map[string]sarama.TopicDetail, error) {
 	return topics, nil
 }
 
-func GetGroups(brokers string) (map[string]string, error) {
-	cadmin, err := sarama.NewClusterAdmin(strings.Split(brokers, ","), newKafkaConfig())
-	if err != nil {
-		return nil, fmt.Errorf("admin-connect")
-	}
-	defer cadmin.Close()
-
+func GetGroups(cadmin sarama.ClusterAdmin) (map[string]string, error) {
 	groups, err := cadmin.ListConsumerGroups()
 	if err != nil {
 		return nil, fmt.Errorf("get-groups")
@@ -151,58 +168,50 @@ func GetGroups(brokers string) (map[string]string, error) {
 	return groups, nil
 }
 
-func GetTopicConsummed(brokers string, topic string, group string) (bool, error) {
-	client, err := sarama.NewClient(strings.Split(brokers, ","), newKafkaConfig())
-	if err != nil {
-		return false, &topicGroupError{"GetTopicConsummed() client-connect", topic, group, err}
-	}
-	defer client.Close()
-
-	parts, err := client.Partitions(topic)
-	if err != nil {
-		return false, &topicGroupError{"GetTopicConsummed() list-partitions", topic, group, err}
-	}
-
+func GetTopicsConsummed(client sarama.Client, topics map[string]sarama.TopicDetail, group string) (map[string]bool, error) {
+	ctopics := make(map[string]bool)
 	request := &sarama.OffsetFetchRequest{Version: 4, ConsumerGroup: group}
-	for _, part := range parts {
-		request.AddPartition(topic, part)
+
+	for topic := range topics {
+		parts, err := client.Partitions(topic)
+		if err != nil {
+			return nil, &groupError{"GetTopicsConsummed() list-partitions", group, err}
+		}
+
+		for _, part := range parts {
+			request.AddPartition(topic, part)
+		}
 	}
 
 	coordinator, err := client.Coordinator(group)
 	if err != nil {
-		return false, &topicGroupError{"GetTopicConsummed() get-coordinator", topic, group, err}
+		return nil, &groupError{"GetTopicConsummed() get-coordinator", group, err}
 	}
 	if ok, _ := coordinator.Connected(); !ok {
 		err = coordinator.Open(client.Config())
 		if err != nil {
-			return false, &topicGroupError{"GetTopicConsummed() open-coordinator", topic, group, err}
+			return nil, &groupError{"GetTopicConsummed() open-coordinator", group, err}
 		}
 	}
 
 	fr, err := coordinator.FetchOffset(request)
 	if err != nil {
-		return false, &topicGroupError{"GetTopicConsummed() fetch-offset", topic, group, err}
+		return nil, &groupError{"GetTopicConsummed() fetch-offset", group, err}
 	}
 
-	for _, parts := range fr.Blocks {
+	for t, parts := range fr.Blocks {
 		for _, block := range parts {
 			if block.Offset != -1 {
-				return true, nil
+				ctopics[t] = true
 			}
 		}
 	}
 
-	return false, nil
+	return ctopics, nil
 }
 
-func GetTopicMetrics(brokers string, topic string) (map[int32]TopicMetrics, error) {
+func GetTopicMetrics(client sarama.Client, topic string, ts bool) (map[int32]TopicMetrics, error) {
 	metrics := make(map[int32]TopicMetrics)
-
-	client, err := sarama.NewClient(strings.Split(brokers, ","), newKafkaConfig())
-	if err != nil {
-		return nil, &topicError{"GetTopicMetrics() client-connect", topic, err}
-	}
-	defer client.Close()
 
 	parts, err := client.Partitions(topic)
 	if err != nil {
@@ -218,6 +227,11 @@ func GetTopicMetrics(brokers string, topic string) (map[int32]TopicMetrics, erro
 		isr, err := client.InSyncReplicas(topic, part)
 		if err != nil {
 			return nil, &topicPartError{"GetTopicMetrics() get-insync-replicas", topic, part, err}
+		}
+
+		var underRep int = 0
+		if len(isr) < len(replicas) {
+			underRep = 1
 		}
 
 		leader, err := client.Leader(topic, part)
@@ -261,44 +275,41 @@ func GetTopicMetrics(brokers string, topic string) (map[int32]TopicMetrics, erro
 		var newestTime, oldestTime time.Time
 		var oldestInterval time.Duration
 
-		/* if there are no message, we cannot get timestamps */
-		if msgnumber > 0 {
-			/* newest is the next offset so getting the previous one */
-			newestTime, err = GetTimestamp(leader, topic, part, newest-1)
-			if err != nil {
-				return nil, &topicPartError{"GetTopicMetrics() get-timestamp-topic-offset-latest", topic, part, err}
-			}
+		if ts {
+			/* if there are no message, we cannot get timestamps */
+			if msgnumber > 0 {
+				// newest is the next offset so getting the previous one
+				newestTime, err = GetTimestamp(leader, topic, part, newest-1)
+				if err != nil {
+					return nil, &topicPartError{"GetTopicMetrics() get-timestamp-topic-offset-latest", topic, part, err}
+				}
 
-			oldestTime, err = GetTimestamp(leader, topic, part, oldest)
-			if err != nil {
-				return nil, &topicPartError{"GetTopicMetrics() get-timestamp-topic-offset-oldest", topic, part, err}
+				oldestTime, err = GetTimestamp(leader, topic, part, oldest)
+				if err != nil {
+					return nil, &topicPartError{"GetTopicMetrics() get-timestamp-topic-offset-oldest", topic, part, err}
+				}
+				oldestInterval = time.Since(oldestTime)
 			}
-			oldestInterval = time.Since(oldestTime)
 		}
 
 		metrics[part] = TopicMetrics{
-			Leader:         leader.ID(),
-			LeaderISP:      leaderISP,
-			Replicas:       len(replicas),
-			InSyncReplicas: len(isr),
-			Newest:         newest,
-			Oldest:         oldest,
-			MsgNumber:      msgnumber,
-			NewestTime:     newestTime,
-			OldestTime:     oldestInterval,
+			Replicas:        len(replicas),
+			InSyncReplicas:  len(isr),
+			Leader:          leader.ID(),
+			LeaderISP:       leaderISP,
+			UnderReplicated: underRep,
+			Newest:          newest,
+			Oldest:          oldest,
+			MsgNumber:       msgnumber,
+			NewestTime:      newestTime,
+			OldestTime:      oldestInterval,
 		}
 	}
 	return metrics, nil
 }
 
-func GetGroupMetrics(brokers string, topic string, group string, tm map[int32]TopicMetrics) (map[int32]GroupMetrics, error) {
+func GetGroupMetrics(client sarama.Client, topic string, group string, tm map[int32]TopicMetrics, ts bool) (map[int32]GroupMetrics, error) {
 	metrics := make(map[int32]GroupMetrics)
-
-	client, err := sarama.NewClient(strings.Split(brokers, ","), newKafkaConfig())
-	if err != nil {
-		return nil, &topicGroupError{"GetGroupMetrics() client-connect", topic, group, err}
-	}
-	defer client.Close()
 
 	parts, err := client.Partitions(topic)
 	if err != nil {
@@ -357,17 +368,19 @@ func GetGroupMetrics(brokers string, topic string, group string, tm map[int32]To
 			olag = 0
 		}
 
-		/* we need at least two messages available */
-		if msgnumber > 1 && olag > 0 && current > oldest {
-			currentTime, err := GetTimestamp(leader, topic, part, current-1)
-			if err != nil {
-				return nil, &topicGroupPartError{"GetGroupMetrics() get-timestamp-group-offset", topic, group, part, err}
-			}
+		if ts {
+			/* we need at least two messages available */
+			if msgnumber > 1 && olag > 0 && current > oldest {
+				currentTime, err := GetTimestamp(leader, topic, part, current-1)
+				if err != nil {
+					return nil, &topicGroupPartError{"GetGroupMetrics() get-timestamp-group-offset", topic, group, part, err}
+				}
 
-			if currentTime != nullTime && newestTime != nullTime && newestTime.After(currentTime) {
-				tlag = newestTime.Sub(currentTime)
-			} else {
-				tlag = 0
+				if currentTime != nullTime && newestTime != nullTime && newestTime.After(currentTime) {
+					tlag = newestTime.Sub(currentTime)
+				} else {
+					tlag = 0
+				}
 			}
 		}
 

@@ -13,7 +13,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	log "github.com/sirupsen/logrus"
 
-	"yakle/metrics"
+	"yakle/internal/metrics"
 )
 
 type config struct {
@@ -22,16 +22,25 @@ type config struct {
 	mpath    string
 	clabel   string
 	tfilter  string
+	gfilter  string
 	interval int
+	ts       bool
 	debug    bool
 }
 
 var (
-	version      string
-	build        string
+	version         string
+	build           string
+	partitionMetric = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "kafka_topic_partition",
+			Help: "Number of partition for a given topic",
+		},
+		[]string{"cluster", "topic"},
+	)
 	leaderMetric = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
-			Name: "yakle_topic_partition_leader",
+			Name: "kafka_topic_partition_leader",
 			Help: "Leader Broker ID for a given topic/partition",
 		},
 		[]string{"cluster", "topic", "partition"},
@@ -50,7 +59,7 @@ var (
 		},
 		[]string{"cluster", "topic", "partition"},
 	)
-	replicasInsyncMetric = prometheus.NewGaugeVec(
+	replicasInSyncMetric = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Name: "kafka_topic_partition_isr",
 			Help: "Number of in-sync replicas for a given topic/partition",
@@ -67,7 +76,7 @@ var (
 	oldestOffsetMetric = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Name: "kafka_topic_partition_oldest_offset",
-			Help: "Oldest available offset for a given topic/partition",
+			Help: "Oldest available offset (low watermark) for a given topic/partition",
 		},
 		[]string{"cluster", "topic", "partition"},
 	)
@@ -114,8 +123,10 @@ func main() {
 	flag.StringVar(&conf.laddr, "web.listen-address", ":8080", "address (host:port) to listen on for telemetry")
 	flag.StringVar(&conf.mpath, "web.telemetry-path", "/metrics", "path under which to expose metrics")
 	flag.StringVar(&conf.clabel, "kafka.label", "kafka-cluster", "kafka cluster name for labeling metrics")
-	flag.StringVar(&conf.tfilter, "topic.filter", "^__.*", "regex for excluding topics")
+	flag.StringVar(&conf.tfilter, "topic.filter", "^__.*", "regex for excluding topics, default to internal topics")
+	flag.StringVar(&conf.gfilter, "group.filter", "^__.*", "regex for excluding groups, default to internal groups")
 	flag.IntVar(&conf.interval, "refresh.interval", 30, "interval for refreshing metrics")
+	flag.BoolVar(&conf.ts, "kafka.fetch-timestamp", false, "enable timestamps calculation")
 	flag.BoolVar(&conf.debug, "log.enable-sarama", false, "enable sarama debug logging")
 	flag.Parse()
 
@@ -124,10 +135,12 @@ func main() {
 		metrics.Debug = true
 	}
 
+	prometheus.MustRegister(partitionMetric)
 	prometheus.MustRegister(leaderMetric)
 	prometheus.MustRegister(leaderIsPreferredMetric)
 	prometheus.MustRegister(replicasMetric)
-	prometheus.MustRegister(replicasInsyncMetric)
+	prometheus.MustRegister(replicasInSyncMetric)
+	prometheus.MustRegister(underReplicatedMetric)
 	prometheus.MustRegister(oldestOffsetMetric)
 	prometheus.MustRegister(newestOffsetMetric)
 	prometheus.MustRegister(oldestTimeMetric)
@@ -135,25 +148,46 @@ func main() {
 	prometheus.MustRegister(offsetGroupLagMetric)
 	prometheus.MustRegister(timeGroupLagMetric)
 
+	ts := conf.ts
 	clabel := conf.clabel
 	tfilter := regexp.MustCompile(conf.tfilter)
+	gfilter := regexp.MustCompile(conf.gfilter)
 
 	go func() {
 		ticker := time.NewTicker(time.Duration(conf.interval) * time.Second)
 		for range ticker.C {
 			log.Infof("getMetrics fired")
 
-			topics, err := metrics.GetTopics(conf.brokers)
+			admin, err := metrics.AdminConnect(conf.brokers)
+			if err != nil {
+				log.Errorf("AdminConnect failed: %v", err)
+				admin.Close()
+				continue
+			}
+
+			topics, err := metrics.GetTopics(admin)
 			if err != nil {
 				log.Errorf("getTopics() failed: %v", err)
 				continue
 			}
 
-			groups, err := metrics.GetGroups(conf.brokers)
+			groups, err := metrics.GetGroups(admin)
 			if err != nil {
 				log.Errorf("getGroups() failed: %v", err)
 				continue
 			}
+
+			admin.Close()
+
+			client, err := metrics.ClientConnect(conf.brokers)
+			if err != nil {
+				log.Errorf("ClientConnect failed: %v", err)
+				client.Close()
+				continue
+			}
+
+			// topics metrics
+			atms := make(map[string]map[int32]metrics.TopicMetrics)
 
 			for topic := range topics {
 				if tfilter.MatchString(topic) {
@@ -161,38 +195,50 @@ func main() {
 					continue
 				}
 
-				log.Infof("getTopicMetrics() started for topic: %s", topic)
-				tms, err := metrics.GetTopicMetrics(conf.brokers, topic)
+				log.Debugf("getTopicMetrics() started for topic: %s", topic)
+				tms, err := metrics.GetTopicMetrics(client, topic, ts)
 				if err != nil {
 					log.Errorf("getTopicMetrics() failed: %v", err)
 					continue
 				}
-				log.Infof("getTopicMetrics() ended for topic: %s", topic)
+				log.Debugf("getTopicMetrics() ended for topic: %s", topic)
+				partitionMetric.WithLabelValues(clabel, topic).Set(float64(len(tms)))
+
 				for p, tm := range tms {
 					log.Debugf("getTopicMetrics() topic: %s, part: %d, leader: %d, isp: %d, replicas: %d, isr: %d, oldest: %d, newest: %d",
 						topic, p, tm.Leader, tm.LeaderISP, tm.Replicas, tm.InSyncReplicas, tm.Oldest, tm.Newest)
 					leaderMetric.WithLabelValues(clabel, topic, strconv.Itoa(int(p))).Set(float64(tm.Leader))
 					leaderIsPreferredMetric.WithLabelValues(clabel, topic, strconv.Itoa(int(p))).Set(float64(tm.LeaderISP))
 					replicasMetric.WithLabelValues(clabel, topic, strconv.Itoa(int(p))).Set(float64(tm.Replicas))
-					replicasInsyncMetric.WithLabelValues(clabel, topic, strconv.Itoa(int(p))).Set(float64(tm.InSyncReplicas))
+					replicasInSyncMetric.WithLabelValues(clabel, topic, strconv.Itoa(int(p))).Set(float64(tm.InSyncReplicas))
+					underReplicatedMetric.WithLabelValues(clabel, topic, strconv.Itoa(int(p))).Set(float64(tm.UnderReplicated))
 					oldestOffsetMetric.WithLabelValues(clabel, topic, strconv.Itoa(int(p))).Set(float64(tm.Oldest))
 					newestOffsetMetric.WithLabelValues(clabel, topic, strconv.Itoa(int(p))).Set(float64(tm.Newest))
 					oldestTimeMetric.WithLabelValues(clabel, topic, strconv.Itoa(int(p))).Set(float64(tm.OldestTime / time.Millisecond))
 				}
+				atms[topic] = tms
+			}
 
-				for group := range groups {
-					consummed, err := metrics.GetTopicConsummed(conf.brokers, topic, group)
-					if !consummed || err != nil {
-						log.Debugf("skip topic: %s, group: %s", topic, group)
-						continue
-					}
-					log.Infof("getGroupMetrics() started for topic: %s, group: %s", topic, group)
-					gms, err := metrics.GetGroupMetrics(conf.brokers, topic, group, tms)
+			// groups metrics
+			for group := range groups {
+				if gfilter.MatchString(group) {
+					log.Debugf("skip group: %s", group)
+					continue
+				}
+				ctopics, err := metrics.GetTopicsConsummed(client, topics, group)
+				if err != nil {
+					log.Errorf("getTopicsConsummed() failed: %v", err)
+					continue
+				}
+				for topic := range ctopics {
+					log.Infof("getGroupMetrics() started for group %s, topic: %s", group, topic)
+
+					gms, err := metrics.GetGroupMetrics(client, topic, group, atms[topic], ts)
 					if err != nil {
 						log.Errorf("getGroupMetrics() failed: %v", err)
 						continue
 					}
-					log.Infof("getGroupMetrics() ended for topic: %s, group: %s", topic, group)
+					log.Debugf("getGroupMetrics() ended for topic: %s, group: %s", topic, group)
 					for p, gm := range gms {
 						log.Debugf("getGroupMetrics() topic: %s, group: %s, part: %d, current: %d, olag: %d",
 							topic, group, p, gm.Current, gm.OffsetLag)
@@ -202,6 +248,8 @@ func main() {
 					}
 				}
 			}
+
+			client.Close()
 			log.Infof("getMetrics ended")
 		}
 	}()

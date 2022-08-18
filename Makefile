@@ -2,18 +2,17 @@ DOCKER_USER=ut0mt8
 IMAGE_NAME=yakle
 BINARY_NAME=yakle
 
-VERSION=`git describe --tags`
+#VERSION=`git describe --tags`
+VERSION=v0.5
 BUILD=`date +%FT%T%z`
 
 LDFLAGS=-ldflags "-X main.version=${VERSION} -X main.build=${BUILD}"
 
-all: deps fmt test vet build
+all: deps fmt vet build
 build:
 	go build ${LDFLAGS} -o $(BINARY_NAME) -v
 vet:
 	go vet
-test:
-	go test -v ./...
 clean:
 	go clean
 	rm -f $(BINARY_NAME)

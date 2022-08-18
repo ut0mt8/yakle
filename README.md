@@ -2,30 +2,35 @@
 
 Kafka lag exporter are either broken, slow or only send metrics to influx.
 This is my attempt to write my own. This is inspired by burrowx, but simplified with the more simple and robust logic I could think of.
-Yakle basically export the same sets of metrics as danielqsj/kafka_exporter but the logic behind is very different. 
+Yakle basically export the same sets of metrics as danielqsj/kafka_exporter but with a more robust logic.
 
-Yakle is fast cause it use only low level kafka api. The main feature compared to other exporters is that yakle reports not only offset lag but also time lag (real time lag, not interpolated).
-Yakle is "production" tested and worked since months in our environment (dozen of kafka clusters, hundred of brokers/topics with many partitions)
+The main feature compared to other exporters is that yakle can reports not only offset lag but also time lag (real time lag, not interpolated).
+Yakle is "production" tested and worked since months in our environment (dozen of kafka clusters, hundred of brokers/topics/groups with many partitions)
 
 ## Usage
 
 ```
 Usage of ./yakle:
-  -brokers="localhost:9092": brokers to connect on
-  -debug=false: enable debug logging
-  -filter="^__.*": regex for filtering topics
-  -interval=10: interval of lag refresh
-  -listen-address=":8080": host:port to listen on
-  -metric-path="/metrics": path exposing metrics
+  -kafka.brokers="localhost:9092": comma separated address list (host:port,) of kafka brokers to connect to
+  -kafka.fetch-timestamp=false: enable timestamps calculation (can be slow, only adivised on brokers with small numbers of topics/groups)
+  -kafka.label="kafka-cluster": kafka cluster name for labeling metrics
+  -log.enable-sarama=false: enable debug and sarama low level logging
+  -refresh.interval=30: interval for refreshing metrics
+  -topic.filter="^__.*": regex for excluding topics, default excluding internal topics
+  -group.filter="^__.*": regex for excluding groups, default excluding internal groups
+  -web.listen-address=":8080": address (host:port) to listen on for telemetry
+  -web.telemetry-path="/metrics": path under which to expose metrics
 ```
 
-Flags can be passed as environment variables. 
+Flags can be also be passed as environment variables. 
 
 Docker image exist at dockerhub `ut0mt8/yakle:latest`
 
 ## Exposed metrics
 
 ### Labels
+
+**`cluster`**: Cluster name
 
 **`topic`**: Topic name
 
@@ -35,6 +40,11 @@ Docker image exist at dockerhub `ut0mt8/yakle:latest`
 
 
 ### Metrics
+
+#### Topic metrics
+| Metric | Description |
+| --- | --- |
+| `kafka_topic_partition{cluster, topic}` | Number of partition for a given topic |
 
 #### Topic / Partition metrics
 
@@ -62,5 +72,5 @@ Docker image exist at dockerhub `ut0mt8/yakle:latest`
 
 ## Todo
 
- - Add unit tests (but mocking kafka brokers is not easy)
+ - Add unit tests...
 
