@@ -1,4 +1,4 @@
-package metrics
+package kafka
 
 import (
 	"fmt"
@@ -240,7 +240,7 @@ func GetTopicMetrics(client sarama.Client, topic string, ts bool) (map[int32]Top
 		}
 		if ok, _ := leader.Connected(); !ok {
 			err = leader.Open(client.Config())
-			if err != nil {
+			if err != nil && err.Error() != "kafka: broker connection already initiated" {
 				return nil, &topicPartError{"GetTopicMetrics() open-leader", topic, part, err}
 			}
 		}
@@ -257,7 +257,7 @@ func GetTopicMetrics(client sarama.Client, topic string, ts bool) (map[int32]Top
 			return nil, &topicPartError{"GetTopicMetrics() get-topic-newest-offset", topic, part, err}
 		}
 
-		/* newest is the next offset on the partition, if at 0 the partition had never be filled,
+		/* newest(high watermark) is the next offset on the partition, if at 0 the partition had never be filled,
 		so there are never been data, and no oldest offest */
 		if newest > 0 {
 			oldest, err = client.GetOffset(topic, part, sarama.OffsetOldest)
@@ -266,7 +266,7 @@ func GetTopicMetrics(client sarama.Client, topic string, ts bool) (map[int32]Top
 			}
 		}
 
-		/* oldest is the last offset availabble on the partition, so the number of message is the
+		/* oldest(low watermark) is the last offset availabble on the partition, so the number of message is the
 		difference between newest and oldest if any */
 		if newest > 0 && oldest >= 0 {
 			msgnumber = newest - oldest
@@ -281,7 +281,7 @@ func GetTopicMetrics(client sarama.Client, topic string, ts bool) (map[int32]Top
 				// newest is the next offset so getting the previous one
 				newestTime, err = GetTimestamp(leader, topic, part, newest-1)
 				if err != nil {
-					return nil, &topicPartError{"GetTopicMetrics() get-timestamp-topic-offset-latest", topic, part, err}
+					return nil, &topicPartError{"GetTopicMetrics() get-timestamp-topic-offset-newest", topic, part, err}
 				}
 
 				oldestTime, err = GetTimestamp(leader, topic, part, oldest)
