@@ -64,7 +64,19 @@ func (e *topicGroupPartError) Error() string {
 	return fmt.Sprintf("[%s](topic: %s, group: %s, partition: %d): %v", e.operation, e.topic, e.group, e.partition, e.err)
 }
 
-type TopicMetrics struct {
+type ClusterMetric struct {
+	BrokerCount int
+	CtrlID      int32
+}
+
+type BrokerMetric struct {
+	Address  string
+	BrokerID int32
+	IsCtrl   int
+	RackID   string
+}
+
+type TopicMetric struct {
 	Leader          int32
 	LeaderISP       int
 	Replicas        int
@@ -77,7 +89,7 @@ type TopicMetrics struct {
 	OldestTime      time.Duration
 }
 
-type GroupMetrics struct {
+type GroupMetric struct {
 	Current   int64
 	OffsetLag int64
 	TimeLag   time.Duration
@@ -99,12 +111,12 @@ func newKafkaConfig() *sarama.Config {
 }
 
 func AdminConnect(brokers string) (sarama.ClusterAdmin, error) {
-	cadmin, err := sarama.NewClusterAdmin(strings.Split(brokers, ","), newKafkaConfig())
+	admin, err := sarama.NewClusterAdmin(strings.Split(brokers, ","), newKafkaConfig())
 	if err != nil {
 		return nil, fmt.Errorf("admin-connect")
 	}
 
-	return cadmin, nil
+	return admin, nil
 }
 
 func ClientConnect(brokers string) (sarama.Client, error) {
@@ -150,8 +162,8 @@ func GetTimestamp(broker *sarama.Broker, topic string, partition int32, offset i
 	return block.Records.RecordBatch.MaxTimestamp, nil
 }
 
-func GetTopics(cadmin sarama.ClusterAdmin) (map[string]sarama.TopicDetail, error) {
-	topics, err := cadmin.ListTopics()
+func GetTopics(admin sarama.ClusterAdmin) (map[string]sarama.TopicDetail, error) {
+	topics, err := admin.ListTopics()
 	if err != nil {
 		return nil, fmt.Errorf("get-topics")
 	}
@@ -159,13 +171,52 @@ func GetTopics(cadmin sarama.ClusterAdmin) (map[string]sarama.TopicDetail, error
 	return topics, nil
 }
 
-func GetGroups(cadmin sarama.ClusterAdmin) (map[string]string, error) {
-	groups, err := cadmin.ListConsumerGroups()
+func GetGroups(admin sarama.ClusterAdmin) (map[string]string, error) {
+	groups, err := admin.ListConsumerGroups()
 	if err != nil {
 		return nil, fmt.Errorf("get-groups")
 	}
 
 	return groups, nil
+}
+
+func GetClusterMetric(admin sarama.ClusterAdmin) (ClusterMetric, error) {
+	brokers, id, err :=admin.DescribeCluster()
+	if err != nil {
+		return ClusterMetric{}, fmt.Errorf("GetClusterMetric() describe-cluster")
+	}
+
+	metric := ClusterMetric{
+		BrokerCount: len(brokers),
+		CtrlID: id,
+	}
+
+	return metric, nil
+}
+
+func GetBrokerMetrics(admin sarama.ClusterAdmin, ctrlID int32) (map[int]BrokerMetric, error) {
+	metrics := make(map[int]BrokerMetric)
+
+	brokers, _, err :=admin.DescribeCluster()
+	if err != nil {
+		return nil, fmt.Errorf("GetBrokerMetrics() describe-cluster")
+	}
+
+	for i, broker := range brokers {
+		isCtrl := 0
+		if ctrlID == broker.ID() {
+			isCtrl = 1
+		}
+
+		metrics[i] = BrokerMetric{
+			Address: broker.Addr(),
+			BrokerID: broker.ID(),
+			IsCtrl: isCtrl,
+			RackID: broker.Rack(),
+		}
+	}
+
+	return metrics, nil
 }
 
 func GetTopicsConsummed(client sarama.Client, topics map[string]sarama.TopicDetail, group string) (map[string]bool, error) {
@@ -210,8 +261,8 @@ func GetTopicsConsummed(client sarama.Client, topics map[string]sarama.TopicDeta
 	return ctopics, nil
 }
 
-func GetTopicMetrics(client sarama.Client, topic string, ts bool) (map[int32]TopicMetrics, error) {
-	metrics := make(map[int32]TopicMetrics)
+func GetTopicMetrics(client sarama.Client, topic string, ts bool) (map[int32]TopicMetric, error) {
+	metrics := make(map[int32]TopicMetric)
 
 	parts, err := client.Partitions(topic)
 	if err != nil {
@@ -292,7 +343,7 @@ func GetTopicMetrics(client sarama.Client, topic string, ts bool) (map[int32]Top
 			}
 		}
 
-		metrics[part] = TopicMetrics{
+		metrics[part] = TopicMetric{
 			Replicas:        len(replicas),
 			InSyncReplicas:  len(isr),
 			Leader:          leader.ID(),
@@ -308,8 +359,8 @@ func GetTopicMetrics(client sarama.Client, topic string, ts bool) (map[int32]Top
 	return metrics, nil
 }
 
-func GetGroupMetrics(client sarama.Client, topic string, group string, tm map[int32]TopicMetrics, ts bool) (map[int32]GroupMetrics, error) {
-	metrics := make(map[int32]GroupMetrics)
+func GetGroupMetrics(client sarama.Client, topic string, group string, tm map[int32]TopicMetric, ts bool) (map[int32]GroupMetric, error) {
+	metrics := make(map[int32]GroupMetric)
 
 	parts, err := client.Partitions(topic)
 	if err != nil {
@@ -384,7 +435,7 @@ func GetGroupMetrics(client sarama.Client, topic string, group string, tm map[in
 			}
 		}
 
-		metrics[part] = GroupMetrics{
+		metrics[part] = GroupMetric{
 			Current:   current,
 			OffsetLag: olag,
 			TimeLag:   tlag,

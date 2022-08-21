@@ -3,7 +3,7 @@ IMAGE_NAME=yakle
 BINARY_NAME=yakle
 
 #VERSION=`git describe --tags`
-VERSION=v0.5
+VERSION=v0.5.1
 BUILD=`date +%FT%T%z`
 
 LDFLAGS=-ldflags "-X main.version=${VERSION} -X main.build=${BUILD}"

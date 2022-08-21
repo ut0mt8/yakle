@@ -41,6 +41,12 @@ Docker image exist at dockerhub `ut0mt8/yakle:latest`
 
 ### Metrics
 
+#### global metrics
+| Metric | Description |
+| --- | --- |
+| `kafka_cluster_info{cluster, broker_count, controller_id, group_count, topic_count}` | General informations for the cluster |
+| `kafka_broker_info{cluster, broker_id, address, is_controller, rack_id}` | Informations for a given broker |
+
 #### Topic metrics
 | Metric | Description |
 | --- | --- |

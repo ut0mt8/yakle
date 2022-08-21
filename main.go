@@ -32,16 +32,16 @@ type config struct {
 }
 
 var (
-	version         string
-	build           string
-	clusterInfoMetric = prometheus.NewGaugeVec(
+	version       string
+	build         string
+	clusterMetric = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Name: "kafka_cluster_info",
 			Help: "Informations for the cluster",
 		},
-		[]string{"cluster", "broker_count", "controller_id"},
+		[]string{"cluster", "broker_count", "controller_id", "topic_count", "group_count"},
 	)
-	brokerInfoMetric = prometheus.NewGaugeVec(
+	brokerMetric = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Name: "kafka_broker_info",
 			Help: "Informations for a given broker",
@@ -153,8 +153,8 @@ func main() {
 		kafka.Debug = true
 	}
 
-	prometheus.MustRegister(clusterInfoMetric)
-	prometheus.MustRegister(brokerInfoMetric)
+	prometheus.MustRegister(clusterMetric)
+	prometheus.MustRegister(brokerMetric)
 	prometheus.MustRegister(partitionMetric)
 	prometheus.MustRegister(leaderMetric)
 	prometheus.MustRegister(leaderIsPreferredMetric)
@@ -198,7 +198,24 @@ func main() {
 			}
 
 			// cluster metrics
-			// broker metrics
+			cm, err := kafka.GetClusterMetric(admin)
+			if err != nil {
+				log.Errorf("getClusterMetrics() failed: %v", err)
+				continue
+			}
+			clusterMetric.WithLabelValues(clabel, strconv.Itoa(cm.BrokerCount), strconv.Itoa(int(cm.CtrlID)),
+				strconv.Itoa(len(topics)), strconv.Itoa(len(groups))).Set(1)
+
+			// brokers metrics
+			bms, err := kafka.GetBrokerMetrics(admin, cm.CtrlID)
+			if err != nil {
+				log.Errorf("getBrokerMetrics() failed: %v", err)
+				continue
+			}
+			for _, bm := range bms {
+				brokerMetric.WithLabelValues(clabel, strconv.Itoa(int(bm.BrokerID)), bm.Address,
+					strconv.Itoa(int(bm.IsCtrl)), bm.RackID).Set(1)
+			}
 
 			admin.Close()
 
@@ -210,7 +227,7 @@ func main() {
 			}
 
 			// topics metrics
-			atms := make(map[string]map[int32]kafka.TopicMetrics)
+			atms := make(map[string]map[int32]kafka.TopicMetric)
 			mutex := &sync.Mutex{}
 
 			tworkers := conf.workers
@@ -236,7 +253,7 @@ func main() {
 						log.Errorf("getTopicMetrics() failed: %v", err)
 						return
 					}
-					log.Debugf("getTopicMetrics() ended for topic: %s", topic)
+					log.Debugf("getTopicMetrics() ended for topic: %s", t)
 					partitionMetric.WithLabelValues(clabel, t).Set(float64(len(tms)))
 
 					for p, tm := range tms {
@@ -285,7 +302,7 @@ func main() {
 						return
 					}
 					for t := range ctopics {
-						log.Debugf("getGroupMetrics() started for group %s, topic: %s", group, t)
+						log.Debugf("getGroupMetrics() started for group %s, topic: %s", g, t)
 
 						gms, err := kafka.GetGroupMetrics(client, t, g, atms[t], ts)
 						if err != nil {
