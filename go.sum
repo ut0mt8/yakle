@@ -258,8 +258,8 @@ github.com/xdg-go/stringprep v1.0.3/go.mod h1:W3f5j4i+9rC0kuIEJL0ky1VpHXQU3ocBgk
 github.com/yuin/goldmark v1.1.25/go.mod h1:3hX8gzYuyVAZsxl0MRgGTJEmQBFcNTphYh9decYSb74=
 github.com/yuin/goldmark v1.1.27/go.mod h1:3hX8gzYuyVAZsxl0MRgGTJEmQBFcNTphYh9decYSb74=
 github.com/yuin/goldmark v1.1.32/go.mod h1:3hX8gzYuyVAZsxl0MRgGTJEmQBFcNTphYh9decYSb74=
-github.com/zenthangplus/goccm v0.0.0-20211005163543-2f2e522aca15 h1:0UwX38TojH86Dl0n4OwPMNYy8hNs2NhtzwY4RlvANlA=
-github.com/zenthangplus/goccm v0.0.0-20211005163543-2f2e522aca15/go.mod h1:DUzu/BC4TkgUfXP8J1P6Md73Djt+0l0CHq001Pt4weA=
+github.com/zenthangplus/goccm v1.1.2 h1:6nwYTP2Dy4giyZ+0gBIdfIMcelqF4yHow0tMIy7x5/o=
+github.com/zenthangplus/goccm v1.1.2/go.mod h1:DUzu/BC4TkgUfXP8J1P6Md73Djt+0l0CHq001Pt4weA=
 go.opencensus.io v0.21.0/go.mod h1:mSImk1erAIZhrmZN+AvHh14ztQfjbGwt4TtuofqLduU=
 go.opencensus.io v0.22.0/go.mod h1:+kGneAE2xo2IficOXnaByMWTGM9T73dGwxeWcUqIpI8=
 go.opencensus.io v0.22.2/go.mod h1:yxeiOL68Rb0Xd1ddK5vPZ/oVn4vY4Ynel7k9FzqtOIw=

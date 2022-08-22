@@ -8,7 +8,7 @@ require (
 	github.com/prometheus/client_golang v1.13.0
 	github.com/rcrowley/go-metrics v0.0.0-20201227073835-cf1acfcdf475
 	github.com/sirupsen/logrus v1.9.0
-	github.com/zenthangplus/goccm v0.0.0-20211005163543-2f2e522aca15
+	github.com/zenthangplus/goccm v1.1.2
 )
 
 require (

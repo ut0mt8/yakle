@@ -97,6 +97,13 @@ var (
 		},
 		[]string{"cluster", "topic", "partition"},
 	)
+	groupInfoMetric = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "kafka_group_info",
+			Help: "Informations for a given group",
+		},
+		[]string{"cluster", "group", "state", "member_count"},
+	)
 	currentGroupOffsetMetric = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Name: "kafka_group_topic_partition_current_offset",
@@ -148,6 +155,7 @@ func main() {
 	prometheus.MustRegister(oldestOffsetMetric)
 	prometheus.MustRegister(newestOffsetMetric)
 	prometheus.MustRegister(oldestTimeMetric)
+	prometheus.MustRegister(groupInfoMetric)
 	prometheus.MustRegister(currentGroupOffsetMetric)
 	prometheus.MustRegister(offsetGroupLagMetric)
 	prometheus.MustRegister(timeGroupLagMetric)
@@ -272,11 +280,13 @@ func main() {
 			gc := goccm.New(gworkers)
 
 			// groups metrics
-			for group := range groups {
-				if gfilter.MatchString(group) {
-					log.Debugf("skip group: %s", group)
+			for _, group := range groups {
+				if gfilter.MatchString(group.GroupId) {
+					log.Debugf("skip group: %s", group.GroupId)
 					continue
 				}
+
+				groupInfoMetric.WithLabelValues(clabel, group.GroupId, group.State, strconv.Itoa(len(group.Members))).Set(1)
 
 				gc.Wait()
 				go func(g string) {
@@ -304,7 +314,7 @@ func main() {
 							timeGroupLagMetric.WithLabelValues(clabel, g, t, strconv.Itoa(int(p))).Set(float64(gm.TimeLag / time.Millisecond))
 						}
 					}
-				}(group)
+				}(group.GroupId)
 			}
 
 			gc.WaitAllDone()

@@ -155,7 +155,7 @@ func GetTimestamp(broker *sarama.Broker, topic string, partition int32, offset i
 	}
 
 	block := fr.GetBlock(topic, partition)
-	if block == nil || block.Records == nil {
+	if block == nil || block.Records == nil || block.Records.RecordBatch == nil {
 		return nullTime, fmt.Errorf("cannot get block")
 	}
 
@@ -171,13 +171,24 @@ func GetTopics(admin sarama.ClusterAdmin) (map[string]sarama.TopicDetail, error)
 	return topics, nil
 }
 
-func GetGroups(admin sarama.ClusterAdmin) (map[string]string, error) {
-	groups, err := admin.ListConsumerGroups()
+func GetGroups(admin sarama.ClusterAdmin) ([]*sarama.GroupDescription, error) {
+	var groups []string
+
+	glist, err := admin.ListConsumerGroups()
 	if err != nil {
-		return nil, fmt.Errorf("get-groups")
+		return nil, fmt.Errorf("get-groups-list")
 	}
 
-	return groups, nil
+	for group := range(glist) {
+		groups = append(groups, group)
+	}
+
+	gds, err := admin.DescribeConsumerGroups(groups)
+	if err != nil {
+		return nil, fmt.Errorf("get-groups-describe")
+	}
+
+	return gds, nil
 }
 
 func GetClusterMetric(admin sarama.ClusterAdmin) (ClusterMetric, error) {

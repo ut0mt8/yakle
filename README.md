@@ -68,6 +68,7 @@ Docker image exist at dockerhub `ut0mt8/yakle:latest`
 
 | Metric | Description |
 | --- | --- |
+| `kafka_group_info{cluster, group, coordinator_id, state, members_count}` | Informations for a given group |
 | `kafka_group_topic_partition_current_offset{cluster, group, topic, partition}` | Current offset for a given group/topic/partition |
 | `kafka_group_topic_partition_offset_lag{cluster, group, topic, partition}` | Offset lag for a given group/topic/partition |
 | `kafka_group_topic_partition_time_lag{cluster, group, topic, partition}` | Time lag (in ms) for a given group/topic/partition |
@@ -76,6 +77,7 @@ Docker image exist at dockerhub `ut0mt8/yakle:latest`
 
 ## Todo
 
- - Refacto kafka_topic_partition, kafka_topic_partition_leader metrics, kafka_topic_partition_isr ?
+ - Add logdir_size metrics
+ - Update grafana dashboards in repo
  - Add unit tests...
 
