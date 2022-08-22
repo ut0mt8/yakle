@@ -78,7 +78,7 @@ type BrokerMetric struct {
 
 type TopicMetric struct {
 	Leader          int32
-	LeaderISP       int
+	LeaderNP        int
 	Replicas        int
 	InSyncReplicas  int
 	UnderReplicated int
@@ -296,12 +296,12 @@ func GetTopicMetrics(client sarama.Client, topic string, ts bool) (map[int32]Top
 			}
 		}
 
-		var leaderISP int = 0
+		var leaderNP int = 1
 		if len(isr) != 0 && isr[0] == leader.ID() {
-			leaderISP = 1
+			leaderNP = 0
 		}
 
-		var oldest, msgnumber int64 = -1, 0
+		var oldest, msgnumber int64 = 0, 0
 
 		newest, err := client.GetOffset(topic, part, sarama.OffsetNewest)
 		if err != nil {
@@ -347,7 +347,7 @@ func GetTopicMetrics(client sarama.Client, topic string, ts bool) (map[int32]Top
 			Replicas:        len(replicas),
 			InSyncReplicas:  len(isr),
 			Leader:          leader.ID(),
-			LeaderISP:       leaderISP,
+			LeaderNP:        leaderNP,
 			UnderReplicated: underRep,
 			Newest:          newest,
 			Oldest:          oldest,

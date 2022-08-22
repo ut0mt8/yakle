@@ -34,52 +34,38 @@ type config struct {
 var (
 	version       string
 	build         string
-	clusterMetric = prometheus.NewGaugeVec(
+	clusterInfoMetric = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Name: "kafka_cluster_info",
 			Help: "Informations for the cluster",
 		},
 		[]string{"cluster", "broker_count", "controller_id", "topic_count", "group_count"},
 	)
-	brokerMetric = prometheus.NewGaugeVec(
+	brokerInfoMetric = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Name: "kafka_broker_info",
 			Help: "Informations for a given broker",
 		},
 		[]string{"cluster", "broker_id", "address", "is_controller", "rack_id"},
 	)
-	partitionMetric = prometheus.NewGaugeVec(
+	topicInfoMetric = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
-			Name: "kafka_topic_partition",
-			Help: "Number of partition for a given topic",
+			Name: "kafka_topic_info",
+			Help: "Informations for a given topic",
 		},
-		[]string{"cluster", "topic"},
+		[]string{"cluster", "topic", "partition_count", "replication_factor"},
 	)
-	leaderMetric = prometheus.NewGaugeVec(
+	topicPartitionInfoMetric = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
-			Name: "kafka_topic_partition_leader",
-			Help: "Leader Broker ID for a given topic/partition",
+			Name: "kafka_topic_partition_info",
+			Help: "Informations for a given topic/partition",
 		},
-		[]string{"cluster", "topic", "partition"},
+		[]string{"cluster", "topic", "partition", "leader", "replicas", "insync_replicas"},
 	)
-	leaderIsPreferredMetric = prometheus.NewGaugeVec(
+	notPreferredMetric = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
-			Name: "kafka_topic_partition_leader_is_preferred",
-			Help: "Boolean indicating if the leader use its preferred broker for a given topic/partition",
-		},
-		[]string{"cluster", "topic", "partition"},
-	)
-	replicasMetric = prometheus.NewGaugeVec(
-		prometheus.GaugeOpts{
-			Name: "kafka_topic_partition_replicas",
-			Help: "Number of replicas for a given topic/partition",
-		},
-		[]string{"cluster", "topic", "partition"},
-	)
-	replicasInSyncMetric = prometheus.NewGaugeVec(
-		prometheus.GaugeOpts{
-			Name: "kafka_topic_partition_isr",
-			Help: "Number of in-sync replicas for a given topic/partition",
+			Name: "kafka_topic_partition_not_preferred",
+			Help: "Boolean indicating if the leader don't use its preferred broker for a given topic/partition",
 		},
 		[]string{"cluster", "topic", "partition"},
 	)
@@ -100,7 +86,7 @@ var (
 	newestOffsetMetric = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Name: "kafka_topic_partition_newest_offset",
-			Help: "Last committed offset for a given topic/partition",
+			Help: "Last committed offset (high watermark) for a given topic/partition",
 		},
 		[]string{"cluster", "topic", "partition"},
 	)
@@ -153,13 +139,11 @@ func main() {
 		kafka.Debug = true
 	}
 
-	prometheus.MustRegister(clusterMetric)
-	prometheus.MustRegister(brokerMetric)
-	prometheus.MustRegister(partitionMetric)
-	prometheus.MustRegister(leaderMetric)
-	prometheus.MustRegister(leaderIsPreferredMetric)
-	prometheus.MustRegister(replicasMetric)
-	prometheus.MustRegister(replicasInSyncMetric)
+	prometheus.MustRegister(clusterInfoMetric)
+	prometheus.MustRegister(brokerInfoMetric)
+	prometheus.MustRegister(topicInfoMetric)
+	prometheus.MustRegister(topicPartitionInfoMetric)
+	prometheus.MustRegister(notPreferredMetric)
 	prometheus.MustRegister(underReplicatedMetric)
 	prometheus.MustRegister(oldestOffsetMetric)
 	prometheus.MustRegister(newestOffsetMetric)
@@ -203,7 +187,7 @@ func main() {
 				log.Errorf("getClusterMetrics() failed: %v", err)
 				continue
 			}
-			clusterMetric.WithLabelValues(clabel, strconv.Itoa(cm.BrokerCount), strconv.Itoa(int(cm.CtrlID)),
+			clusterInfoMetric.WithLabelValues(clabel, strconv.Itoa(cm.BrokerCount), strconv.Itoa(int(cm.CtrlID)),
 				strconv.Itoa(len(topics)), strconv.Itoa(len(groups))).Set(1)
 
 			// brokers metrics
@@ -213,7 +197,7 @@ func main() {
 				continue
 			}
 			for _, bm := range bms {
-				brokerMetric.WithLabelValues(clabel, strconv.Itoa(int(bm.BrokerID)), bm.Address,
+				brokerInfoMetric.WithLabelValues(clabel, strconv.Itoa(int(bm.BrokerID)), bm.Address,
 					strconv.Itoa(int(bm.IsCtrl)), bm.RackID).Set(1)
 			}
 
@@ -237,11 +221,14 @@ func main() {
 
 			tc := goccm.New(tworkers)
 
-			for topic := range topics {
-				if tfilter.MatchString(topic) {
-					log.Debugf("skip topic: %s", topic)
+			for tname, topic := range topics {
+				if tfilter.MatchString(tname) {
+					log.Debugf("skip topic: %s", tname)
 					continue
 				}
+
+				topicInfoMetric.WithLabelValues(clabel, tname, strconv.Itoa(int(topic.NumPartitions)),
+					strconv.Itoa(int(topic.ReplicationFactor))).Set(1)
 
 				tc.Wait()
 				go func(t string) {
@@ -254,15 +241,14 @@ func main() {
 						return
 					}
 					log.Debugf("getTopicMetrics() ended for topic: %s", t)
-					partitionMetric.WithLabelValues(clabel, t).Set(float64(len(tms)))
 
 					for p, tm := range tms {
-						log.Debugf("getTopicMetrics() topic: %s, part: %d, leader: %d, isp: %d, replicas: %d, isr: %d, oldest: %d, newest: %d",
-							t, p, tm.Leader, tm.LeaderISP, tm.Replicas, tm.InSyncReplicas, tm.Oldest, tm.Newest)
-						leaderMetric.WithLabelValues(clabel, t, strconv.Itoa(int(p))).Set(float64(tm.Leader))
-						leaderIsPreferredMetric.WithLabelValues(clabel, t, strconv.Itoa(int(p))).Set(float64(tm.LeaderISP))
-						replicasMetric.WithLabelValues(clabel, t, strconv.Itoa(int(p))).Set(float64(tm.Replicas))
-						replicasInSyncMetric.WithLabelValues(clabel, t, strconv.Itoa(int(p))).Set(float64(tm.InSyncReplicas))
+						log.Debugf("getTopicMetrics() topic: %s, part: %d, leader: %d, np: %d, replicas: %d, isr: %d, oldest: %d, newest: %d",
+							t, p, tm.Leader, tm.LeaderNP, tm.Replicas, tm.InSyncReplicas, tm.Oldest, tm.Newest)
+
+						topicPartitionInfoMetric.WithLabelValues(clabel, t, strconv.Itoa(int(p)),
+							strconv.Itoa(int(tm.Leader)), strconv.Itoa(tm.Replicas), strconv.Itoa(tm.InSyncReplicas)).Set(1)
+						notPreferredMetric.WithLabelValues(clabel, t, strconv.Itoa(int(p))).Set(float64(tm.LeaderNP))
 						underReplicatedMetric.WithLabelValues(clabel, t, strconv.Itoa(int(p))).Set(float64(tm.UnderReplicated))
 						oldestOffsetMetric.WithLabelValues(clabel, t, strconv.Itoa(int(p))).Set(float64(tm.Oldest))
 						newestOffsetMetric.WithLabelValues(clabel, t, strconv.Itoa(int(p))).Set(float64(tm.Newest))
@@ -273,7 +259,7 @@ func main() {
 					atms[t] = tms
 					mutex.Unlock()
 
-				}(topic)
+				}(tname)
 			}
 
 			tc.WaitAllDone()

@@ -50,16 +50,14 @@ Docker image exist at dockerhub `ut0mt8/yakle:latest`
 #### Topic metrics
 | Metric | Description |
 | --- | --- |
-| `kafka_topic_partition{cluster, topic}` | Number of partition for a given topic |
+| `kafka_topic_info{cluster, topic, partition_count, replication_factor}` | Informations for a given topic |
 
 #### Topic / Partition metrics
 
 | Metric | Description |
 | --- | --- |
-| `kafka_topic_partition_leader{cluster, topic, partition}` | Leader Broker ID for a given topic/partition |
-| `kafka_topic_partition_leader_is_preferred{cluster, topic, partition}` | Boolean indicating if the leader use its preferred broker for a given topic/partition |
-| `kafka_topic_partition_replicas{cluster, topic, partition}` | Number of replicas for a given topic/partition |
-| `kafka_topic_partition_isr{cluster, topic, partition}` | Number of in-sync replicas for a given topic/partition |
+| `kafka_topic_partition_info{cluster, topic, partition, leader, replicas, insync_replicas}` | Informations for a given topic/partition |
+| `kafka_topic_partition_not_preferred{cluster, topic, partition}` | Boolean indicating if the leader don't use its preferred broker for a given topic/partition |
 | `kafka_topic_partition_under_replicated{cluster, topic, partition}` | Boolean indicating if all replicas are in sync for a given topic/partition |
 | `kafka_topic_partition_newest_offset{cluster, topic, partition}` | Latest commited offset for a given topic/partition |
 | `kafka_topic_partition_oldest_offset{cluster, topic, partition}` | Oldest offset available for a given topic/partition |
@@ -78,5 +76,6 @@ Docker image exist at dockerhub `ut0mt8/yakle:latest`
 
 ## Todo
 
+ - Refacto kafka_topic_partition, kafka_topic_partition_leader metrics, kafka_topic_partition_isr ?
  - Add unit tests...
 
