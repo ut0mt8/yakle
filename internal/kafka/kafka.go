@@ -179,7 +179,7 @@ func GetGroups(admin sarama.ClusterAdmin) ([]*sarama.GroupDescription, error) {
 		return nil, fmt.Errorf("get-groups-list")
 	}
 
-	for group := range(glist) {
+	for group := range glist {
 		groups = append(groups, group)
 	}
 
@@ -192,14 +192,14 @@ func GetGroups(admin sarama.ClusterAdmin) ([]*sarama.GroupDescription, error) {
 }
 
 func GetClusterMetric(admin sarama.ClusterAdmin) (ClusterMetric, error) {
-	brokers, id, err :=admin.DescribeCluster()
+	brokers, id, err := admin.DescribeCluster()
 	if err != nil {
 		return ClusterMetric{}, fmt.Errorf("GetClusterMetric() describe-cluster")
 	}
 
 	metric := ClusterMetric{
 		BrokerCount: len(brokers),
-		CtrlID: id,
+		CtrlID:      id,
 	}
 
 	return metric, nil
@@ -208,7 +208,7 @@ func GetClusterMetric(admin sarama.ClusterAdmin) (ClusterMetric, error) {
 func GetBrokerMetrics(admin sarama.ClusterAdmin, ctrlID int32) (map[int]BrokerMetric, error) {
 	metrics := make(map[int]BrokerMetric)
 
-	brokers, _, err :=admin.DescribeCluster()
+	brokers, _, err := admin.DescribeCluster()
 	if err != nil {
 		return nil, fmt.Errorf("GetBrokerMetrics() describe-cluster")
 	}
@@ -220,10 +220,10 @@ func GetBrokerMetrics(admin sarama.ClusterAdmin, ctrlID int32) (map[int]BrokerMe
 		}
 
 		metrics[i] = BrokerMetric{
-			Address: broker.Addr(),
+			Address:  broker.Addr(),
 			BrokerID: broker.ID(),
-			IsCtrl: isCtrl,
-			RackID: broker.Rack(),
+			IsCtrl:   isCtrl,
+			RackID:   broker.Rack(),
 		}
 	}
 

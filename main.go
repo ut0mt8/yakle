@@ -32,8 +32,8 @@ type config struct {
 }
 
 var (
-	version       string
-	build         string
+	version           string
+	build             string
 	clusterInfoMetric = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Name: "kafka_cluster_info",

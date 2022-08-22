@@ -1,11 +1,13 @@
 # YAKLE (Yet Another Kafka Lag Exporter)
 
 Kafka lag exporter are either broken, slow or only send metrics to influx.
-This is my attempt to write my own. This is inspired by burrowx, but simplified with the more simple and robust logic I could think of.
-Yakle basically export the same sets of metrics as danielqsj/kafka_exporter but with a more robust logic.
+This is my attempt to write my own. This is inspired by burrowx, but simplified with the more robust logic I could think of.
+Yakle basically export the same sets of metrics as danielqsj/kafka_exporter *and* kminion. Dashboards are based on kminion one but a bit extended.
 
-The main feature compared to other exporters is that yakle can reports not only offset lag but also time lag (real time lag, not interpolated).
+One cool feature compared to other exporters is that yakle can reports not only offset lag but also time lag (real time lag, not interpolated).
+Be aware that this only work for non compacted topics and that this feature is relatively slow (need to fetch lot of individual offsets).
 Yakle is "production" tested and worked since months in our environment (dozen of kafka clusters, hundred of brokers/topics/groups with many partitions)
+Yakle is tested fast enough. Parallelism is set to 10 workers by default. You can try to increase it but this is not measured faster and put a lot of pressure on kafka cluster.
 
 ## Usage
 
@@ -28,20 +30,17 @@ Docker image exist at dockerhub `ut0mt8/yakle:latest`
 
 ## Exposed metrics
 
-### Labels
+### Common Labels
 
 **`cluster`**: Cluster name
-
 **`topic`**: Topic name
-
 **`partition`**: Partition ID 
-
 **`group`**: Consumer group name
 
 
 ### Metrics
 
-#### global metrics
+#### Global metrics
 | Metric | Description |
 | --- | --- |
 | `kafka_cluster_info{cluster, broker_count, controller_id, group_count, topic_count}` | General informations for the cluster |
