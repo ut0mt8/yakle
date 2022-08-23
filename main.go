@@ -14,7 +14,6 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	log "github.com/sirupsen/logrus"
 	"github.com/zenthangplus/goccm"
-
 	"yakle/internal/kafka"
 )
 
@@ -129,7 +128,8 @@ var (
 
 func main() {
 	var conf config
-	flag.StringVar(&conf.brokers, "kafka.brokers", "localhost:9092", "address list (host:port) of kafka brokers to connect to")
+
+	flag.StringVar(&conf.brokers, "kafka.brokers", "localhost:9092", "address list of kafka brokers to connect to")
 	flag.StringVar(&conf.laddr, "web.listen-address", ":8080", "address (host:port) to listen on for telemetry")
 	flag.StringVar(&conf.mpath, "web.telemetry-path", "/metrics", "path under which to expose metrics")
 	flag.StringVar(&conf.clabel, "kafka.label", "kafka-cluster", "kafka cluster name for labeling metrics")
@@ -142,8 +142,8 @@ func main() {
 	flag.Parse()
 
 	if conf.debug {
-		log.SetLevel(log.DebugLevel)
 		kafka.Debug = true
+		log.SetLevel(log.DebugLevel)
 	}
 
 	prometheus.MustRegister(clusterInfoMetric)
@@ -160,7 +160,7 @@ func main() {
 	prometheus.MustRegister(offsetGroupLagMetric)
 	prometheus.MustRegister(timeGroupLagMetric)
 
-	ts := conf.ts
+	timestamp := conf.ts
 	clabel := conf.clabel
 	tfilter := regexp.MustCompile(conf.tfilter)
 	gfilter := regexp.MustCompile(conf.gfilter)
@@ -173,7 +173,6 @@ func main() {
 			admin, err := kafka.AdminConnect(conf.brokers)
 			if err != nil {
 				log.Errorf("AdminConnect failed: %v", err)
-				admin.Close()
 				continue
 			}
 
@@ -190,23 +189,25 @@ func main() {
 			}
 
 			// cluster metrics
-			cm, err := kafka.GetClusterMetric(admin)
+			cmetric, err := kafka.GetClusterMetric(admin)
 			if err != nil {
 				log.Errorf("getClusterMetrics() failed: %v", err)
 				continue
 			}
-			clusterInfoMetric.WithLabelValues(clabel, strconv.Itoa(cm.BrokerCount), strconv.Itoa(int(cm.CtrlID)),
+
+			clusterInfoMetric.WithLabelValues(clabel, strconv.Itoa(cmetric.BrokerCount), strconv.Itoa(int(cmetric.CtrlID)),
 				strconv.Itoa(len(topics)), strconv.Itoa(len(groups))).Set(1)
 
 			// brokers metrics
-			bms, err := kafka.GetBrokerMetrics(admin, cm.CtrlID)
+			bmetrics, err := kafka.GetBrokerMetrics(admin, cmetric.CtrlID)
 			if err != nil {
 				log.Errorf("getBrokerMetrics() failed: %v", err)
 				continue
 			}
-			for _, bm := range bms {
-				brokerInfoMetric.WithLabelValues(clabel, strconv.Itoa(int(bm.BrokerID)), bm.Address,
-					strconv.Itoa(int(bm.IsCtrl)), bm.RackID).Set(1)
+
+			for _, bmetric := range bmetrics {
+				brokerInfoMetric.WithLabelValues(clabel, strconv.Itoa(int(bmetric.BrokerID)), bmetric.Address,
+					strconv.Itoa(bmetric.IsCtrl), bmetric.RackID).Set(1)
 			}
 
 			admin.Close()
@@ -214,7 +215,6 @@ func main() {
 			client, err := kafka.ClientConnect(conf.brokers)
 			if err != nil {
 				log.Errorf("ClientConnect failed: %v", err)
-				client.Close()
 				continue
 			}
 
@@ -227,7 +227,7 @@ func main() {
 				tworkers = len(topics)
 			}
 
-			tc := goccm.New(tworkers)
+			tcwrk := goccm.New(tworkers)
 
 			for tname, topic := range topics {
 				if tfilter.MatchString(tname) {
@@ -238,46 +238,53 @@ func main() {
 				topicInfoMetric.WithLabelValues(clabel, tname, strconv.Itoa(int(topic.NumPartitions)),
 					strconv.Itoa(int(topic.ReplicationFactor))).Set(1)
 
-				tc.Wait()
-				go func(t string) {
-					defer tc.Done()
-					log.Debugf("getTopicMetrics() started for topic: %s", t)
+				tcwrk.Wait()
 
-					tms, err := kafka.GetTopicMetrics(client, t, ts)
+				go func(topic string) {
+					defer tcwrk.Done()
+					log.Debugf("getTopicMetrics() started for topic: %s", topic)
+
+					tpms, err := kafka.GetTopicMetrics(client, topic, timestamp)
 					if err != nil {
 						log.Errorf("getTopicMetrics() failed: %v", err)
 						return
 					}
-					log.Debugf("getTopicMetrics() ended for topic: %s", t)
 
-					for p, tm := range tms {
-						log.Debugf("getTopicMetrics() topic: %s, part: %d, leader: %d, np: %d, replicas: %d, isr: %d, oldest: %d, newest: %d",
-							t, p, tm.Leader, tm.LeaderNP, tm.Replicas, tm.InSyncReplicas, tm.Oldest, tm.Newest)
+					log.Debugf("getTopicMetrics() ended for topic: %s", topic)
 
-						topicPartitionInfoMetric.WithLabelValues(clabel, t, strconv.Itoa(int(p)),
-							strconv.Itoa(int(tm.Leader)), strconv.Itoa(tm.Replicas), strconv.Itoa(tm.InSyncReplicas)).Set(1)
-						notPreferredMetric.WithLabelValues(clabel, t, strconv.Itoa(int(p))).Set(float64(tm.LeaderNP))
-						underReplicatedMetric.WithLabelValues(clabel, t, strconv.Itoa(int(p))).Set(float64(tm.UnderReplicated))
-						oldestOffsetMetric.WithLabelValues(clabel, t, strconv.Itoa(int(p))).Set(float64(tm.Oldest))
-						newestOffsetMetric.WithLabelValues(clabel, t, strconv.Itoa(int(p))).Set(float64(tm.Newest))
-						oldestTimeMetric.WithLabelValues(clabel, t, strconv.Itoa(int(p))).Set(float64(tm.OldestTime / time.Millisecond))
+					for part, tpm := range tpms {
+						log.Debugf(
+							"getTopicMetrics() topic: %s, part: %d, leader: %d, np: %d, replicas: %d, isr: %d, oldest: %d, newest: %d",
+							topic, part, tpm.Leader, tpm.LeaderNP, tpm.Replicas, tpm.InSyncReplicas, tpm.Oldest, tpm.Newest)
+
+						topicPartitionInfoMetric.WithLabelValues(clabel, topic, strconv.Itoa(int(part)),
+							strconv.Itoa(int(tpm.Leader)), strconv.Itoa(tpm.Replicas), strconv.Itoa(tpm.InSyncReplicas)).Set(1)
+						notPreferredMetric.WithLabelValues(clabel, topic,
+							strconv.Itoa(int(part))).Set(float64(tpm.LeaderNP))
+						underReplicatedMetric.WithLabelValues(clabel, topic,
+							strconv.Itoa(int(part))).Set(float64(tpm.UnderReplicated))
+						oldestOffsetMetric.WithLabelValues(clabel, topic,
+							strconv.Itoa(int(part))).Set(float64(tpm.Oldest))
+						newestOffsetMetric.WithLabelValues(clabel, topic,
+							strconv.Itoa(int(part))).Set(float64(tpm.Newest))
+						oldestTimeMetric.WithLabelValues(clabel, topic,
+							strconv.Itoa(int(part))).Set(float64(tpm.OldestTime / time.Millisecond))
 					}
 
 					mutex.Lock()
-					atms[t] = tms
+					atms[topic] = tpms
 					mutex.Unlock()
-
 				}(tname)
 			}
 
-			tc.WaitAllDone()
+			tcwrk.WaitAllDone()
 
 			gworkers := conf.workers
 			if len(groups) < conf.workers {
 				gworkers = len(topics)
 			}
 
-			gc := goccm.New(gworkers)
+			gcwrk := goccm.New(gworkers)
 
 			// groups metrics
 			for _, group := range groups {
@@ -288,36 +295,45 @@ func main() {
 
 				groupInfoMetric.WithLabelValues(clabel, group.GroupId, group.State, strconv.Itoa(len(group.Members))).Set(1)
 
-				gc.Wait()
-				go func(g string) {
-					defer gc.Done()
+				gcwrk.Wait()
 
-					ctopics, err := kafka.GetTopicsConsummed(client, topics, g)
+				go func(group string) {
+					defer gcwrk.Done()
+
+					ctopics, err := kafka.GetTopicsConsummed(client, topics, group)
 					if err != nil {
 						log.Errorf("getTopicsConsummed() failed: %v", err)
 						return
 					}
-					for t := range ctopics {
-						log.Debugf("getGroupMetrics() started for group %s, topic: %s", g, t)
 
-						gms, err := kafka.GetGroupMetrics(client, t, g, atms[t], ts)
+					for ctopic := range ctopics {
+						log.Debugf("getGroupMetrics() started for group %s, topic: %s", group, ctopic)
+
+						gpms, err := kafka.GetGroupMetrics(client, ctopic, group, atms[ctopic], timestamp)
 						if err != nil {
 							log.Errorf("getGroupMetrics() failed: %v", err)
 							continue
 						}
-						log.Debugf("getGroupMetrics() ended for topic: %s, group: %s", t, g)
-						for p, gm := range gms {
-							log.Debugf("getGroupMetrics() topic: %s, group: %s, part: %d, current: %d, olag: %d",
-								t, g, p, gm.Current, gm.OffsetLag)
-							currentGroupOffsetMetric.WithLabelValues(clabel, g, t, strconv.Itoa(int(p))).Set(float64(gm.Current))
-							offsetGroupLagMetric.WithLabelValues(clabel, g, t, strconv.Itoa(int(p))).Set(float64(gm.OffsetLag))
-							timeGroupLagMetric.WithLabelValues(clabel, g, t, strconv.Itoa(int(p))).Set(float64(gm.TimeLag / time.Millisecond))
+
+						log.Debugf("getGroupMetrics() ended for topic: %s, group: %s", ctopic, group)
+
+						for part, gpm := range gpms {
+							log.Debugf(
+								"getGroupMetrics() topic: %s, group: %s, part: %d, current: %d, olag: %d",
+								ctopic, group, part, gpm.Current, gpm.OffsetLag)
+
+							currentGroupOffsetMetric.WithLabelValues(clabel, group, ctopic,
+								strconv.Itoa(int(part))).Set(float64(gpm.Current))
+							offsetGroupLagMetric.WithLabelValues(clabel, group, ctopic,
+								strconv.Itoa(int(part))).Set(float64(gpm.OffsetLag))
+							timeGroupLagMetric.WithLabelValues(clabel, group, ctopic,
+								strconv.Itoa(int(part))).Set(float64(gpm.TimeLag / time.Millisecond))
 						}
 					}
 				}(group.GroupId)
 			}
 
-			gc.WaitAllDone()
+			gcwrk.WaitAllDone()
 			client.Close()
 			log.Infof("getMetrics ended")
 		}

@@ -1,0 +1,31 @@
+linters:
+  disable:
+    # obnoxious
+    - cyclop
+    - dupl
+    - exhaustivestruct
+    - exhaustruct
+    - forcetypeassert
+    - funlen
+    - gochecknoinits
+    - gochecknoglobals
+    - gocognit
+    - gocyclo
+    - godox
+    - gomnd
+    - nlreturn
+    - nosnakecase
+    - ireturn
+    - paralleltest
+    - testpackage
+    - maintidx
+    - nestif
+
+    # deprecated
+    - golint
+    - ifshort
+    - interfacer
+    - maligned
+    - scopelint
+  enable-all: true
+
