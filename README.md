@@ -76,6 +76,5 @@ Docker image exist at dockerhub `ut0mt8/yakle:latest`
 
 ## Todo
 
- - Update grafana dashboards in repo
  - Add unit tests...
 
