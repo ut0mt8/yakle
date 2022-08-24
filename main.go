@@ -54,6 +54,13 @@ var (
 		},
 		[]string{"cluster", "topic", "partition_count", "replication_factor"},
 	)
+	logDirMetric = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "kafka_topic_broker_logdir_size",
+			Help: "Logdir size for a given topic/broker",
+		},
+		[]string{"cluster", "topic", "broker", "path"},
+	)
 	topicPartitionInfoMetric = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Name: "kafka_topic_partition_info",
@@ -149,6 +156,7 @@ func main() {
 	prometheus.MustRegister(clusterInfoMetric)
 	prometheus.MustRegister(brokerInfoMetric)
 	prometheus.MustRegister(topicInfoMetric)
+	prometheus.MustRegister(logDirMetric)
 	prometheus.MustRegister(topicPartitionInfoMetric)
 	prometheus.MustRegister(notPreferredMetric)
 	prometheus.MustRegister(underReplicatedMetric)
@@ -188,7 +196,6 @@ func main() {
 				continue
 			}
 
-			// cluster metrics
 			cmetric, err := kafka.GetClusterMetric(admin)
 			if err != nil {
 				log.Errorf("getClusterMetrics() failed: %v", err)
@@ -198,7 +205,6 @@ func main() {
 			clusterInfoMetric.WithLabelValues(clabel, strconv.Itoa(cmetric.BrokerCount), strconv.Itoa(int(cmetric.CtrlID)),
 				strconv.Itoa(len(topics)), strconv.Itoa(len(groups))).Set(1)
 
-			// brokers metrics
 			bmetrics, err := kafka.GetBrokerMetrics(admin, cmetric.CtrlID)
 			if err != nil {
 				log.Errorf("getBrokerMetrics() failed: %v", err)
@@ -210,6 +216,18 @@ func main() {
 					strconv.Itoa(bmetric.IsCtrl), bmetric.RackID).Set(1)
 			}
 
+			lgmetrics, err := kafka.GetLogDirMetrics(admin)
+			if err != nil {
+				log.Errorf("getBrokerMetrics() failed: %v", err)
+				continue
+			}
+
+			for brkid, lgbms := range lgmetrics {
+				for topic, lgm := range lgbms {
+					logDirMetric.WithLabelValues(clabel, topic, strconv.Itoa(int(brkid)), lgm.Path).Set(float64(lgm.Size))
+				}
+			}
+
 			admin.Close()
 
 			client, err := kafka.ClientConnect(conf.brokers)
@@ -218,7 +236,6 @@ func main() {
 				continue
 			}
 
-			// topics metrics
 			atms := make(map[string]map[int32]kafka.TopicMetric)
 			mutex := &sync.Mutex{}
 
@@ -286,7 +303,6 @@ func main() {
 
 			gcwrk := goccm.New(gworkers)
 
-			// groups metrics
 			for _, group := range groups {
 				if gfilter.MatchString(group.GroupId) {
 					log.Debugf("skip group: %s", group.GroupId)

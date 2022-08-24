@@ -86,6 +86,11 @@ type BrokerMetric struct {
 	RackID   string
 }
 
+type LogDirMetric struct {
+	Path string
+	Size int64
+}
+
 type TopicMetric struct {
 	Leader          int32
 	LeaderNP        int
@@ -239,6 +244,43 @@ func GetBrokerMetrics(admin sarama.ClusterAdmin, ctrlID int32) (map[int]BrokerMe
 	return metrics, nil
 }
 
+func GetLogDirMetrics(admin sarama.ClusterAdmin) (map[int32]map[string]LogDirMetric, error) {
+	metrics := make(map[int32]map[string]LogDirMetric)
+
+	blist, _, err := admin.DescribeCluster()
+	if err != nil {
+		return nil, &commonError{"GetLogDirMetrics() describe-cluster", err}
+	}
+
+	brokers := make([]int32, 0, len(blist))
+	for _, broker := range blist {
+		brokers = append(brokers, broker.ID())
+	}
+
+	dldrs, err := admin.DescribeLogDirs(brokers)
+	if err != nil {
+		return nil, &commonError{"GetLogDirMetrics() describe-logdirs", err}
+	}
+
+	for brkid, brkr := range dldrs {
+		if len(brkr) > 0 {
+			logdir := brkr[0]
+			metrics[brkid] = map[string]LogDirMetric{}
+
+			for _, topic := range logdir.Topics {
+				tsize := int64(0)
+				for _, part := range topic.Partitions {
+					tsize += part.Size
+				}
+
+				metrics[brkid][topic.Topic] = LogDirMetric{Path: logdir.Path, Size: tsize}
+			}
+		}
+	}
+
+	return metrics, nil
+}
+
 func GetTopicsConsummed(client sarama.Client,
 	topics map[string]sarama.TopicDetail, group string) (map[string]bool, error) {
 
@@ -248,7 +290,7 @@ func GetTopicsConsummed(client sarama.Client,
 	for topic := range topics {
 		parts, err := client.Partitions(topic)
 		if err != nil {
-			return nil, &groupError{"GetTopicsConsummed() list-partitions", group, err}
+			return nil, &groupError{"GetTopicsConsummed() get-partitions", group, err}
 		}
 
 		for _, part := range parts {
@@ -289,7 +331,7 @@ func GetTopicMetrics(client sarama.Client, topic string, timestamp bool) (map[in
 
 	parts, err := client.Partitions(topic)
 	if err != nil {
-		return nil, &topicError{"GetTopicMetrics() list-partitions", topic, err}
+		return nil, &topicError{"GetTopicMetrics() get-partitions", topic, err}
 	}
 
 	for _, part := range parts {
@@ -394,7 +436,7 @@ func GetGroupMetrics(client sarama.Client, topic string, group string,
 
 	parts, err := client.Partitions(topic)
 	if err != nil {
-		return nil, &topicGroupError{"GetGroupMetrics() list-partitions", topic, group, err}
+		return nil, &topicGroupError{"GetGroupMetrics() get-partitions", topic, group, err}
 	}
 
 	for _, part := range parts {

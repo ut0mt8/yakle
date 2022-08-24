@@ -2,8 +2,7 @@ DOCKER_USER=ut0mt8
 IMAGE_NAME=yakle
 BINARY_NAME=yakle
 
-#VERSION=`git describe --tags`
-VERSION=v0.6.0
+VERSION=v0.6.4
 BUILD=`date +%FT%T%z`
 
 LDFLAGS=-ldflags "-X main.version=${VERSION} -X main.build=${BUILD}"

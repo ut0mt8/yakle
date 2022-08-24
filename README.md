@@ -50,9 +50,9 @@ Docker image exist at dockerhub `ut0mt8/yakle:latest`
 | Metric | Description |
 | --- | --- |
 | `kafka_topic_info{cluster, topic, partition_count, replication_factor}` | Informations for a given topic |
+| `kafka_topic_broker_logdir_size{cluster, topic, broker, path}` | Logdir size for a given topic/broker |
 
 #### Topic / Partition metrics
-
 | Metric | Description |
 | --- | --- |
 | `kafka_topic_partition_info{cluster, topic, partition, leader, replicas, insync_replicas}` | Informations for a given topic/partition |
@@ -64,7 +64,6 @@ Docker image exist at dockerhub `ut0mt8/yakle:latest`
 
 
 #### Consumer group metrics
-
 | Metric | Description |
 | --- | --- |
 | `kafka_group_info{cluster, group, coordinator_id, state, members_count}` | Informations for a given group |
@@ -76,7 +75,6 @@ Docker image exist at dockerhub `ut0mt8/yakle:latest`
 
 ## Todo
 
- - Add logdir_size metrics
  - Update grafana dashboards in repo
  - Add unit tests...
 
