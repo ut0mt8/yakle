@@ -136,16 +136,16 @@ var (
 func main() {
 	var conf config
 
-	flag.StringVar(&conf.brokers, "kafka.brokers", "localhost:9092", "address list of kafka brokers to connect to")
-	flag.StringVar(&conf.laddr, "web.listen-address", ":8080", "address (host:port) to listen on for telemetry")
-	flag.StringVar(&conf.mpath, "web.telemetry-path", "/metrics", "path under which to expose metrics")
-	flag.StringVar(&conf.clabel, "kafka.label", "kafka-cluster", "kafka cluster name for labeling metrics")
-	flag.StringVar(&conf.tfilter, "topic.filter", "^__.*", "regex for excluding topics, default to internal topics")
-	flag.StringVar(&conf.gfilter, "group.filter", "^__.*", "regex for excluding groups, default to internal groups")
-	flag.IntVar(&conf.interval, "refresh.interval", 30, "interval for refreshing metrics")
-	flag.IntVar(&conf.workers, "kafka.workers", 10, "number of parallel workers for fetching metrics")
-	flag.BoolVar(&conf.ts, "kafka.fetch-timestamp", false, "enable timestamps calculation")
-	flag.BoolVar(&conf.debug, "log.enable-sarama", false, "enable sarama debug logging")
+	flag.StringVar(&conf.brokers, "kafka-brokers", "localhost:9092", "address list of kafka brokers to connect to")
+	flag.StringVar(&conf.laddr, "web-listen-address", ":8080", "address (host:port) to listen on for telemetry")
+	flag.StringVar(&conf.mpath, "web-telemetry-path", "/metrics", "path under which to expose metrics")
+	flag.StringVar(&conf.clabel, "kafka-label", "kafka-cluster", "kafka cluster name for labeling metrics")
+	flag.StringVar(&conf.tfilter, "topic-filter", "^__.*", "regex for excluding topics, default to internal topics")
+	flag.StringVar(&conf.gfilter, "group-filter", "^__.*", "regex for excluding groups, default to internal groups")
+	flag.IntVar(&conf.interval, "refresh-interval", 30, "interval for refreshing metrics")
+	flag.IntVar(&conf.workers, "kafka-workers", 10, "number of parallel workers for fetching metrics")
+	flag.BoolVar(&conf.ts, "kafka-fetch-timestamp", false, "enable timestamps calculation")
+	flag.BoolVar(&conf.debug, "log-debug", false, "enable debug and sarama logging")
 	flag.Parse()
 
 	if conf.debug {

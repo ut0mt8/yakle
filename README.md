@@ -13,15 +13,16 @@ Yakle is tested fast enough. Parallelism is set to 10 workers by default. You ca
 
 ```
 Usage of ./yakle:
-  -kafka.brokers="localhost:9092": comma separated address list (host:port,) of kafka brokers to connect to
-  -kafka.fetch-timestamp=false: enable timestamps calculation (can be slow, only adivised on brokers with small numbers of topics/groups)
-  -kafka.label="kafka-cluster": kafka cluster name for labeling metrics
-  -log.enable-sarama=false: enable debug and sarama low level logging
-  -refresh.interval=30: interval for refreshing metrics
-  -topic.filter="^__.*": regex for excluding topics, default excluding internal topics
-  -group.filter="^__.*": regex for excluding groups, default excluding internal groups
-  -web.listen-address=":8080": address (host:port) to listen on for telemetry
-  -web.telemetry-path="/metrics": path under which to expose metrics
+  -kafka-brokers="localhost:9092": address list of kafka brokers to connect to
+  -kafka-fetch-timestamp=false: enable timestamps calculation
+  -kafka-label="kafka-cluster": kafka cluster name for labeling metrics
+  -kafka-workers=10: number of parallel workers for fetching metrics
+  -log-debug=false: enable debug and sarama logging
+  -refresh-interval=30: interval for refreshing metrics
+  -topic-filter="^__.*": regex for excluding topics, default to internal topics
+  -group-filter="^__.*": regex for excluding groups, default to internal groups
+  -web-listen-address=":8080": address (host:port) to listen on for telemetry
+  -web-telemetry-path="/metrics": path under which to expose metrics
 ```
 
 Flags can be also be passed as environment variables. 
