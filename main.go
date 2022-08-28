@@ -12,7 +12,9 @@ import (
 	"github.com/namsral/flag"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
-	log "github.com/sirupsen/logrus"
+	"github.com/rs/zerolog"
+	"github.com/rs/zerolog/log"
+	"github.com/rs/zerolog/pkgerrors"
 	"github.com/zenthangplus/goccm"
 	"yakle/internal/kafka"
 )
@@ -136,6 +138,9 @@ var (
 func main() {
 	var conf config
 
+	zerolog.TimeFieldFormat = zerolog.TimeFormatUnix
+	zerolog.ErrorStackMarshaler = pkgerrors.MarshalStack
+
 	flag.StringVar(&conf.brokers, "kafka-brokers", "localhost:9092", "address list of kafka brokers to connect to")
 	flag.StringVar(&conf.laddr, "web-listen-address", ":8080", "address (host:port) to listen on for telemetry")
 	flag.StringVar(&conf.mpath, "web-telemetry-path", "/metrics", "path under which to expose metrics")
@@ -150,7 +155,7 @@ func main() {
 
 	if conf.debug {
 		kafka.Debug = true
-		log.SetLevel(log.DebugLevel)
+		zerolog.SetGlobalLevel(zerolog.DebugLevel)
 	}
 
 	prometheus.MustRegister(clusterInfoMetric)
@@ -176,29 +181,29 @@ func main() {
 	go func() {
 		ticker := time.NewTicker(time.Duration(conf.interval) * time.Second)
 		for range ticker.C {
-			log.Infof("getMetrics fired")
+			log.Info().Msg("getMetrics fired")
 
 			admin, err := kafka.AdminConnect(conf.brokers)
 			if err != nil {
-				log.Errorf("AdminConnect failed: %v", err)
+				log.Error().Err(err).Msg("AdminConnect failed")
 				continue
 			}
 
 			topics, err := kafka.GetTopics(admin)
 			if err != nil {
-				log.Errorf("getTopics() failed: %v", err)
+				log.Error().Err(err).Msg("getTopics() failed")
 				continue
 			}
 
 			groups, err := kafka.GetGroups(admin)
 			if err != nil {
-				log.Errorf("getGroups() failed: %v", err)
+				log.Error().Err(err).Msg("getGroups() failed")
 				continue
 			}
 
 			cmetric, err := kafka.GetClusterMetric(admin)
 			if err != nil {
-				log.Errorf("getClusterMetrics() failed: %v", err)
+				log.Error().Err(err).Msg("getClusterMetrics() failed")
 				continue
 			}
 
@@ -207,7 +212,7 @@ func main() {
 
 			bmetrics, err := kafka.GetBrokerMetrics(admin, cmetric.CtrlID)
 			if err != nil {
-				log.Errorf("getBrokerMetrics() failed: %v", err)
+				log.Error().Err(err).Msg("getBrokerMetrics() failed")
 				continue
 			}
 
@@ -218,7 +223,7 @@ func main() {
 
 			lgmetrics, err := kafka.GetLogDirMetrics(admin)
 			if err != nil {
-				log.Errorf("getBrokerMetrics() failed: %v", err)
+				log.Error().Err(err).Msg("getLogDirMetrics() failed")
 				continue
 			}
 
@@ -232,7 +237,7 @@ func main() {
 
 			client, err := kafka.ClientConnect(conf.brokers)
 			if err != nil {
-				log.Errorf("ClientConnect failed: %v", err)
+				log.Error().Err(err).Msg("ClientConnect failed")
 				continue
 			}
 
@@ -248,7 +253,7 @@ func main() {
 
 			for tname, topic := range topics {
 				if tfilter.MatchString(tname) {
-					log.Debugf("skip topic: %s", tname)
+					log.Debug().Msgf("skip topic: %s", tname)
 					continue
 				}
 
@@ -259,18 +264,18 @@ func main() {
 
 				go func(topic string) {
 					defer tcwrk.Done()
-					log.Debugf("getTopicMetrics() started for topic: %s", topic)
+					log.Debug().Msgf("getTopicMetrics() started for topic: %s", topic)
 
 					tpms, err := kafka.GetTopicMetrics(client, topic, timestamp)
 					if err != nil {
-						log.Errorf("getTopicMetrics() failed: %v", err)
+						log.Error().Err(err).Msg("getTopicMetrics() failed")
 						return
 					}
 
-					log.Debugf("getTopicMetrics() ended for topic: %s", topic)
+					log.Debug().Msgf("getTopicMetrics() ended for topic: %s", topic)
 
 					for part, tpm := range tpms {
-						log.Debugf(
+						log.Debug().Msgf(
 							"getTopicMetrics() topic: %s, part: %d, leader: %d, np: %d, replicas: %d, isr: %d, oldest: %d, newest: %d",
 							topic, part, tpm.Leader, tpm.LeaderNP, tpm.Replicas, tpm.InSyncReplicas, tpm.Oldest, tpm.Newest)
 
@@ -305,7 +310,7 @@ func main() {
 
 			for _, group := range groups {
 				if gfilter.MatchString(group.GroupId) {
-					log.Debugf("skip group: %s", group.GroupId)
+					log.Debug().Msgf("skip group: %s", group.GroupId)
 					continue
 				}
 
@@ -318,23 +323,23 @@ func main() {
 
 					ctopics, err := kafka.GetTopicsConsummed(client, topics, group)
 					if err != nil {
-						log.Errorf("getTopicsConsummed() failed: %v", err)
+						log.Error().Err(err).Msg("getTopicsConsummed() failed")
 						return
 					}
 
 					for ctopic := range ctopics {
-						log.Debugf("getGroupMetrics() started for group %s, topic: %s", group, ctopic)
+						log.Debug().Msgf("getGroupMetrics() started for group %s, topic: %s", group, ctopic)
 
 						gpms, err := kafka.GetGroupMetrics(client, ctopic, group, atms[ctopic], timestamp)
 						if err != nil {
-							log.Errorf("getGroupMetrics() failed: %v", err)
+							log.Error().Err(err).Msg("getGroupMetrics() failed")
 							continue
 						}
 
-						log.Debugf("getGroupMetrics() ended for topic: %s, group: %s", ctopic, group)
+						log.Debug().Msgf("getGroupMetrics() ended for topic: %s, group: %s", ctopic, group)
 
 						for part, gpm := range gpms {
-							log.Debugf(
+							log.Debug().Msgf(
 								"getGroupMetrics() topic: %s, group: %s, part: %d, current: %d, olag: %d",
 								ctopic, group, part, gpm.Current, gpm.OffsetLag)
 
@@ -351,7 +356,7 @@ func main() {
 
 			gcwrk.WaitAllDone()
 			client.Close()
-			log.Infof("getMetrics ended")
+			log.Info().Msg("getMetrics ended")
 		}
 	}()
 
@@ -360,7 +365,11 @@ func main() {
 		fmt.Fprint(w, "OK")
 	})
 	http.Handle("/debug/pprof/goroutine", pprof.Handler("goroutine"))
-	log.Infof("yalke version=%s build=%s starting", version, build)
-	log.Infof("beginning to serve on %s, metrics on %s", conf.laddr, conf.mpath)
-	log.Fatal(http.ListenAndServe(conf.laddr, nil))
+
+	log.Info().Msgf("yalke version=%s build=%s starting", version, build)
+	log.Info().Msgf("beginning to serve on %s, metrics on %s", conf.laddr, conf.mpath)
+
+	if err := http.ListenAndServe(conf.laddr, nil); err != nil {
+		log.Fatal().Err(err).Msg("Startup failed")
+	}
 }
