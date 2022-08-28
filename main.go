@@ -370,6 +370,6 @@ func main() {
 	log.Info().Msgf("beginning to serve on %s, metrics on %s", conf.laddr, conf.mpath)
 
 	if err := http.ListenAndServe(conf.laddr, nil); err != nil {
-		log.Fatal().Err(err).Msg("Startup failed")
+		log.Fatal().Err(err).Msg("http startup failed")
 	}
 }
