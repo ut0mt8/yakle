@@ -2,7 +2,7 @@ DOCKER_USER=ut0mt8
 IMAGE_NAME=yakle
 BINARY_NAME=yakle
 
-VERSION=v0.6.7
+VERSION=v0.6.8
 BUILD=`date +%FT%T%z`
 
 LDFLAGS=-ldflags "-X main.version=${VERSION} -X main.build=${BUILD}"

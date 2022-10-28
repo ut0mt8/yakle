@@ -363,7 +363,7 @@ func GetTopicMetrics(client sarama.Client, topic string, timestamp bool) (map[in
 		}
 
 		leaderNP := 1
-		if len(isr) != 0 && isr[0] == leader.ID() {
+		if len(replicas) != 0 && replicas[0] == leader.ID() {
 			leaderNP = 0
 		}
 
