@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Shopify/sarama"
+	"github.com/IBM/sarama"
 	"github.com/rcrowley/go-metrics"
 )
 
@@ -162,7 +162,8 @@ func GetGroupOffset(broker *sarama.Broker, topic string, partition int32, group 
 
 func GetTimestamp(broker *sarama.Broker, topic string, partition int32, offset int64) (time.Time, error) {
 	request := &sarama.FetchRequest{Version: 4}
-	request.AddBlock(topic, partition, offset, 1)
+	request.AddBlock(topic, partition, offset, 1024*1024, 1)
+	//func (r *FetchRequest) AddBlock(topic string, partitionID int32, fetchOffset int64, maxBytes int32, leaderEpoch int32)
 
 	fr, err := broker.Fetch(request)
 	if err != nil {
