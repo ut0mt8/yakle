@@ -9,8 +9,6 @@ import (
 	"time"
 
 	"github.com/namsral/flag"
-
-	//"github.com/VictoriaMetrics/metrics"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 	"github.com/rs/zerolog/pkgerrors"

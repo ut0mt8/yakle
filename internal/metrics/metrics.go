@@ -9,7 +9,7 @@ import (
 
 var (
 	globalMetrics = make(map[string]uint64)
-	mutex         sync.Mutex
+	mutex         sync.RWMutex
 )
 
 func Set(metric string, value uint64) {
@@ -19,9 +19,9 @@ func Set(metric string, value uint64) {
 }
 
 func WritePrometheus(w io.Writer) {
-
 	metrics := make([]string, 0, len(globalMetrics))
 
+	mutex.Lock()
 	for metric := range globalMetrics {
 		metrics = append(metrics, metric)
 	}
@@ -31,4 +31,5 @@ func WritePrometheus(w io.Writer) {
 	for _, metric := range metrics {
 		fmt.Fprintf(w, "%s %d\n", metric, globalMetrics[metric])
 	}
+	mutex.Unlock()
 }
