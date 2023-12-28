@@ -1,11 +1,15 @@
 # YAKLE (Yet Another Kafka Lag Exporter)
 
+Yakle reboot based on franz-go kafka and victoria-metrics client libs. 
+Expected to be 3 time faster and divide memory usage by 2.
+
 Kafka lag exporter are either broken, slow or only send metrics to influx.
 This is my attempt to write my own. This is inspired by burrowx, but simplified with the more robust logic I could think of.
-Yakle basically export the same sets of metrics as danielqsj/kafka_exporter *and* kminion. Dashboards are based on kminion one but a bit extended.
+Yakle basically export the same sets of metrics as danielqsj/kafka_exporter or kminion. Dashboards are based on kminion but extended a bit.
 
 One cool feature compared to other exporters is that yakle can reports not only offset lag but also time lag (real time lag, not interpolated).
 Be aware that this only work for non compacted topics and that this feature is relatively slow (need to fetch lot of individual offsets).
+
 Yakle is "production" tested and worked since months in our environment (dozen of kafka clusters, hundred of brokers/topics/groups with many partitions)
 Yakle is tested fast enough. Parallelism is set to 10 workers by default. You can try to increase it but this is not measured faster and put a lot of pressure on kafka cluster.
 
@@ -17,7 +21,7 @@ Usage of ./yakle:
   -kafka-fetch-timestamp=false: enable timestamps calculation
   -kafka-label="kafka-cluster": kafka cluster name for labeling metrics
   -kafka-workers=10: number of parallel workers for fetching metrics
-  -log-debug=false: enable debug and sarama logging
+  -log-debug=false: enable debug and franz-go logging
   -refresh-interval=30: interval for refreshing metrics
   -topic-filter="^__.*": regex for excluding topics, default to internal topics
   -group-filter="^__.*": regex for excluding groups, default to internal groups
