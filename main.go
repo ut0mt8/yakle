@@ -60,7 +60,7 @@ func main() {
 	//timestamp := conf.ts
 	clabel := conf.clabel
 	tfilter := regexp.MustCompile(conf.tfilter)
-	//gfilter := regexp.MustCompile(conf.gfilter)
+	gfilter := regexp.MustCompile(conf.gfilter)
 
 	go func() {
 		ticker := time.NewTicker(time.Duration(conf.interval) * time.Second)
@@ -83,11 +83,6 @@ func main() {
 				log.Error().Err(err).Msg("BrokerMetadata() failed")
 				continue
 			}
-
-			// kafka_cluster_info{"cluster", "broker_count", "controller_id", "topic_count", "group_count"}
-			clusterInfoMetric := fmt.Sprintf(`kafka_cluster_info{cluster="%s", broker_count="%d", controller_id="%d", topic_count="%d", group_count="%d"}`,
-				clabel, len(brkm.Brokers), brkm.Controller, -1, -1) // TODO topic /group count
-			metrics.GetOrCreateGauge(clusterInfoMetric, nil).Set(1)
 
 			// kafka_broker_info{"cluster", "broker_id", "address", "is_controller", "rack_id"}
 			for _, brkd := range brkm.Brokers {
@@ -133,8 +128,7 @@ func main() {
 				//	clabel, tname, topic.NumPartitions, topic.ReplicationFactor)
 				// metrics.GetOrCreateGauge(topicInfoMetric, nil).Set(1)
 
-				for _, p := range topic.Partitions.Sorted() {
-
+				for _, p := range topic.Partitions {
 					// kafka_topic_partition_info{"cluster", "topic", "partition", "leader", "replicas", "insync_replicas"}
 					topicPartitionInfoMetric := fmt.Sprintf(`kafka_topic_partition_info{cluster="%s", topic="%s", partition="%d", leader="%d", replicas="%d", insync_replicas="%d"}`,
 						clabel, p.Topic, p.Partition, p.Leader, len(p.Replicas), len(p.ISR))
@@ -162,75 +156,101 @@ func main() {
 				}
 			}
 
-			// kafka_topic_partition_oldest_offset{"cluster", "topic", "partition"}
-			// oldestOffsetMetric := fmt.Sprintf(`kafka_topic_partition_oldest_offset{cluster="%s", topic="%s", partition="%d"}`,
-			// 	clabel, topic, part)
-			// metrics.GetOrCreateGauge(oldestOffsetMetric, nil).Set(float64(tpm.Oldest))
+			lso, err := kadmin.ListStartOffsets(ctx)
+			if err != nil {
+				log.Error().Err(err).Msg("ListStartOffsets() failed")
+				continue
+			}
 
-			// kafka_topic_partition_newest_offset{"cluster", "topic", "partition"}
-			// newestOffsetMetric := fmt.Sprintf(`kafka_topic_partition_newest_offset{cluster="%s", topic="%s", partition="%d"}`,
-			//	clabel, topic, part)
-			// metrics.GetOrCreateGauge(newestOffsetMetric, nil).Set(float64(tpm.Newest))
+			for tname, lo := range lso {
+				if tfilter.MatchString(tname) {
+					continue
+				}
+
+				for _, p := range lo {
+					// kafka_topic_partition_oldest_offset{"cluster", "topic", "partition"}
+					oldestOffsetMetric := fmt.Sprintf(`kafka_topic_partition_oldest_offset{cluster="%s", topic="%s", partition="%d"}`,
+						clabel, p.Topic, p.Partition)
+					metrics.GetOrCreateGauge(oldestOffsetMetric, nil).Set(float64(p.Offset))
+				}
+			}
+
+			leo, err := kadmin.ListEndOffsets(ctx)
+			if err != nil {
+				log.Error().Err(err).Msg("ListEndOffsets() failed")
+				continue
+			}
+
+			for tname, lo := range leo {
+				if tfilter.MatchString(tname) {
+					continue
+				}
+
+				for _, p := range lo {
+					// kafka_topic_partition_newest_offset{"cluster", "topic", "partition"}
+					newestOffsetMetric := fmt.Sprintf(`kafka_topic_partition_newest_offset{cluster="%s", topic="%s", partition="%d"}`,
+						clabel, p.Topic, p.Partition)
+					metrics.GetOrCreateGauge(newestOffsetMetric, nil).Set(float64(p.Offset))
+				}
+			}
 
 			// kafka_topic_partition_oldest_time{"cluster", "topic", "partition"}
 			// oldestTimeMetric := fmt.Sprintf(`kafka_topic_partition_oldest_time{cluster="%s", topic="%s", partition="%d"}`,
 			//	clabel, topic, part)
 			// metrics.GetOrCreateGauge(oldestTimeMetric, nil).Set(float64(tpm.OldestTime / time.Millisecond))
 
-			/*
+			lgs, err := kadmin.ListGroups(ctx)
+			if err != nil {
+				log.Error().Err(err).Msg("ListGroups() failed")
+				continue
+			}
 
-				for _, group := range groups {
-					if gfilter.MatchString(group.GroupId) {
-						log.Debug().Msgf("skip group: %s", group.GroupId)
-						continue
-					}
+			var groups []string
+			for g, _ := range lgs {
+				groups = append(groups, g)
+			}
 
-					// kafka_group_info{"cluster", "group", "state", "member_count"}
-					groupInfoMetric := fmt.Sprintf(`kafka_group_info{cluster="%s", group="%s", state="%s", member_count="%d"}`,
-						clabel, group.GroupId, group.State, len(group.Members))
-					//metrics.GetOrCreateGauge(groupInfoMetric, nil).Set(1)
-					metrics.Set(groupInfoMetric, 1)
+			lags, err := kadmin.Lag(ctx, groups...)
+			if err != nil {
+				log.Error().Err(err).Msg("Lag() failed")
+				continue
+			}
 
-					ctopics, err := kafka.GetTopicsConsummed(client, topics, group)
-					if err != nil {
-						log.Error().Err(err).Msg("getTopicsConsummed() failed")
-						return
-					}
+			for gname, group := range lags {
+				if gfilter.MatchString(gname) {
+					continue
+				}
 
-					for ctopic := range ctopics {
-						log.Debug().Msgf("getGroupMetrics() started for group %s, topic: %s", group, ctopic)
+				// kafka_group_info{"cluster", "group", "state", "member_count"}
+				groupInfoMetric := fmt.Sprintf(`kafka_group_info{cluster="%s", group="%s", state="%s", member_count="%d"}`,
+					clabel, gname, group.State, len(group.Members))
+				metrics.GetOrCreateGauge(groupInfoMetric, nil).Set(1)
 
-						gpms, err := kafka.GetGroupMetrics(client, ctopic, group, atms[ctopic], timestamp)
-						if err != nil {
-							log.Error().Err(err).Msg("getGroupMetrics() failed")
-							continue
-						}
+				for tname, gl := range group.Lag {
+					for p, gml := range gl {
+						// kafka_group_topic_partition_current_offset{"cluster", "group", "topic", "partition"}
+						currentGroupOffsetMetric := fmt.Sprintf(`kafka_group_topic_partition_current_offset{cluster="%s", group="%s", topic="%s", partition="%d"}`,
+							clabel, gname, tname, p)
+						metrics.GetOrCreateGauge(currentGroupOffsetMetric, nil).Set(float64(gml.Commit.At))
 
-						log.Debug().Msgf("getGroupMetrics() ended for topic: %s, group: %s", ctopic, group)
+						// kafka_group_topic_partition_offset_lag{"cluster", "group", "topic", "partition"}
+						offsetGroupLagMetric := fmt.Sprintf(`kafka_group_topic_partition_offset_lag{cluster="%s", group="%s", topic="%s", partition="%d"}`,
+							clabel, gname, tname, p)
+						metrics.GetOrCreateGauge(offsetGroupLagMetric, nil).Set(float64(gml.Lag))
 
-						for part, gpm := range gpms {
-							log.Debug().Msgf(
-								"getGroupMetrics() topic: %s, group: %s, part: %d, current: %d, olag: %d",
-								ctopic, group, part, gpm.Current, gpm.OffsetLag)
-
-							// kafka_group_topic_partition_current_offset{"cluster", "group", "topic", "partition"}
-							currentGroupOffsetMetric := fmt.Sprintf(`kafka_group_topic_partition_current_offset{cluster="%s", group="%s", topic="%s", partition="%d"}`,
-								clabel, group, ctopic, part)
-							metrics.GetOrCreateGauge(currentGroupOffsetMetric, nil).Set(float64(gpm.Current))
-
-							// kafka_group_topic_partition_offset_lag{"cluster", "group", "topic", "partition"}
-							offsetGroupLagMetric := fmt.Sprintf(`kafka_group_topic_partition_offset_lag{cluster="%s", group="%s", topic="%s", partition="%d"}`,
-								clabel, group, ctopic, part)
-							metrics.GetOrCreateGauge(offsetGroupLagMetric, nil).Set(float64(gpm.OffsetLag))
-
-							// kafka_group_topic_partition_time_lag{"cluster", "group", "topic", "partition"}
-							// timeGroupLagMetric := fmt.Sprintf(`kafka_group_topic_partition_time_lag{cluster="%s", group="%s", topic="%s", partition="%d"}`,
-							//	clabel, group, ctopic, part)
-							//metrics.GetOrCreateGauge(timeGroupLagMetric, nil).Set(float64(gpm.TimeLag / time.Millisecond))
-						}
+						// kafka_group_topic_partition_time_lag{"cluster", "group", "topic", "partition"}
+						// timeGroupLagMetric := fmt.Sprintf(`kafka_group_topic_partition_time_lag{cluster="%s", group="%s", topic="%s", partition="%d"}`,
+						//	clabel, group, ctopic, part)
+						//metrics.GetOrCreateGauge(timeGroupLagMetric, nil).Set(float64(gpm.TimeLag / time.Millisecond))
 					}
 				}
-			*/
+			}
+
+			// kafka_cluster_info{"cluster", "broker_count", "controller_id", "topic_count", "group_count"}
+			clusterInfoMetric := fmt.Sprintf(`kafka_cluster_info{cluster="%s", broker_count="%d", controller_id="%d", topic_count="%d", group_count="%d"}`,
+				clabel, len(brkm.Brokers), brkm.Controller, len(topics), len(groups))
+			metrics.GetOrCreateGauge(clusterInfoMetric, nil).Set(1)
+
 			elapsed := time.Since(start)
 			log.Info().Str("elapsed", elapsed.String()).Msg("getMetrics ended")
 		}
@@ -250,56 +270,3 @@ func main() {
 		log.Fatal().Err(err).Msg("http startup failed")
 	}
 }
-
-/*
-
-		}
-	}
-
-	var los kadm.ListedOffsets
-
-		los, err = cadmin.ListStartOffsets(context.Background())
-
-	for _, lo := range los {
-		for _, p := range lo {
-			fmt.Printf("%s %d %d\n", p.Topic, p.Partition, p.Offset)
-		}
-	}
-
-		los, err = cadmin.ListEndOffsets(context.Background())
-
-
-	for _, lo := range los {
-		for _, p := range lo {
-			fmt.Printf("%s %d %d\n", p.Topic, p.Partition, p.Offset)
-		}
-	}
-
-
-	lgs, err := cadmin.ListGroups(context.Background())
-	if err != nil {
-		panic(err)
-	}
-
-	var groups []string
-	for g, _ := range lgs{
-		groups = append(groups, g)
-	}
-
-	lags, err :=	cadmin.Lag(context.Background(), groups...)
-	if err != nil {
-		panic(err)
-	}
-
-	for g, lag := range lags {
-		fmt.Printf("\t%s %s \n", g, lag.State)
-		for t, gl := range lag.Lag {
-			for p, gml := range gl {
-				fmt.Printf("\t\t%s %d %d \n", t, p, gml.Lag)
-			}
-		}
-	}
-
-	cadmin.Close()
-}
-*/
