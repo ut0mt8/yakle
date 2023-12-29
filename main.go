@@ -75,7 +75,6 @@ func main() {
 				log.Error().Err(err).Msg("NewClient() failed")
 				continue
 			}
-			defer kclient.Close()
 
 			kadmin := kadm.NewClient(kclient)
 
@@ -265,6 +264,8 @@ func main() {
 			clusterInfoMetric := fmt.Sprintf(`kafka_cluster_info{cluster="%s", broker_count="%d", controller_id="%d", topic_count="%d", group_count="%d"}`,
 				clabel, len(brkm.Brokers), brkm.Controller, len(topics), len(groups))
 			metrics.GetOrCreateGauge(clusterInfoMetric, nil).Set(1)
+
+			kclient.Close()
 
 			elapsed := time.Since(start)
 			log.Info().Str("elapsed", elapsed.String()).Msg("getMetrics ended")

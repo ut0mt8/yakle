@@ -1,6 +1,6 @@
 REGISTRY := ut0mt8
 PROJECT := yakle
-VERSION := v0.7.3
+VERSION := v0.8.2
 BUILD := $(shell date +%FT%T%z)
 
 LDFLAGS=-ldflags "-X main.version=${VERSION} -X main.build=${BUILD}"
