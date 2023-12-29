@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"os"
 	"regexp"
 	"strings"
 	"time"
@@ -12,9 +13,9 @@ import (
 	"github.com/namsral/flag"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
-	"github.com/rs/zerolog/pkgerrors"
 	"github.com/twmb/franz-go/pkg/kadm"
 	"github.com/twmb/franz-go/pkg/kgo"
+	"github.com/twmb/franz-go/plugin/kzerolog"
 )
 
 type config struct {
@@ -37,10 +38,6 @@ var (
 func main() {
 	var conf config
 
-	zerolog.TimeFieldFormat = zerolog.TimeFormatUnix
-	zerolog.ErrorStackMarshaler = pkgerrors.MarshalStack
-	zerolog.SetGlobalLevel(zerolog.InfoLevel)
-
 	flag.StringVar(&conf.brokers, "kafka-brokers", "localhost:9092", "address list of kafka brokers to connect to")
 	flag.StringVar(&conf.laddr, "web-listen-address", ":8080", "address (host:port) to listen on for telemetry")
 	flag.StringVar(&conf.mpath, "web-telemetry-path", "/metrics", "path under which to expose metrics")
@@ -52,8 +49,9 @@ func main() {
 	flag.BoolVar(&conf.debug, "log-debug", false, "enable debug logging")
 	flag.Parse()
 
+	logger := zerolog.New(os.Stdout).Level(zerolog.InfoLevel)
 	if conf.debug {
-		zerolog.SetGlobalLevel(zerolog.DebugLevel)
+		logger = zerolog.New(os.Stdout).Level(zerolog.DebugLevel)
 	}
 
 	ctx := context.Background()
@@ -69,7 +67,10 @@ func main() {
 			log.Info().Msg("getMetrics fired")
 
 			brokers := strings.Split(conf.brokers, ",")
-			kclient, err := kgo.NewClient(kgo.SeedBrokers(brokers...))
+			kclient, err := kgo.NewClient(
+				kgo.WithLogger(kzerolog.New(&logger)),
+				kgo.SeedBrokers(brokers...),
+			)
 			if err != nil {
 				log.Error().Err(err).Msg("NewClient() failed")
 				continue
@@ -84,33 +85,44 @@ func main() {
 				continue
 			}
 
-			// kafka_broker_info{"cluster", "broker_id", "address", "is_controller", "rack_id"}
 			for _, brkd := range brkm.Brokers {
 				isCtrl := 0
 				if brkd.NodeID == brkm.Controller {
 					isCtrl = 1
 				}
+
+				rackID := ""
+				if brkd.Rack != nil {
+					rackID = *brkd.Rack
+				}
+
+				// kafka_broker_info{"cluster", "broker_id", "address", "is_controller", "rack_id"}
 				brokerInfoMetric := fmt.Sprintf(`kafka_broker_info{cluster="%s", broker_id="%d", address="%s", is_controller="%d", rack_id="%s"}`,
-					clabel, brkd.NodeID, brkd.Host, isCtrl, *brkd.Rack)
+					clabel, brkd.NodeID, brkd.Host, isCtrl, rackID)
 				metrics.GetOrCreateGauge(brokerInfoMetric, nil).Set(1)
 			}
 
-			/*
-				lgmetrics, err := kafka.GetLogDirMetrics(admin)
-				if err != nil {
-					log.Error().Err(err).Msg("getLogDirMetrics() failed")
-					continue
-				}
+			dalds, err := kadmin.DescribeAllLogDirs(ctx, nil)
+			if err != nil {
+				log.Error().Err(err).Msg("DescribeAllLogDirs() failed")
+				continue
+			}
 
-				// kafka_topic_broker_logdir_size{"cluster", "topic", "broker", "path"}
-				for brkid, lgbms := range lgmetrics {
-					for topic, lgm := range lgbms {
+			for brkid, dlds := range dalds {
+				for dir, dld := range dlds {
+					for tname, dldt := range dld.Topics {
+						var size int64 = 0
+						for _, dldp := range dldt {
+							size = size + dldp.Size
+						}
+
+						// kafka_topic_broker_logdir_size{"cluster", "topic", "broker", "path"}
 						logDirMetric := fmt.Sprintf(`kafka_topic_broker_logdir_size{cluster="%s", topic="%s", broker="%d", path="%s"}`,
-							clabel, topic, brkid, lgm.Path)
-						metrics.GetOrCreateGauge(logDirMetric, nil).Set(float64(lgm.Size))
+							clabel, tname, brkid, dir)
+						metrics.GetOrCreateGauge(logDirMetric, nil).Set(float64(size))
 					}
 				}
-			*/
+			}
 
 			topics, err := kadmin.ListTopics(ctx)
 			if err != nil {
@@ -123,12 +135,10 @@ func main() {
 					continue
 				}
 
-				// kafka_topic_info{"cluster", "topic", "partition_count", "replication_factor"}
-				// topicInfoMetric := fmt.Sprintf(`kafka_topic_info{cluster="%s", topic="%s", partition_count="%d", replication_factor="%d"}`,
-				//	clabel, tname, topic.NumPartitions, topic.ReplicationFactor)
-				// metrics.GetOrCreateGauge(topicInfoMetric, nil).Set(1)
-
+				rf := 0
 				for _, p := range topic.Partitions {
+					rf = len(p.Replicas)
+
 					// kafka_topic_partition_info{"cluster", "topic", "partition", "leader", "replicas", "insync_replicas"}
 					topicPartitionInfoMetric := fmt.Sprintf(`kafka_topic_partition_info{cluster="%s", topic="%s", partition="%d", leader="%d", replicas="%d", insync_replicas="%d"}`,
 						clabel, p.Topic, p.Partition, p.Leader, len(p.Replicas), len(p.ISR))
@@ -154,6 +164,11 @@ func main() {
 						clabel, p.Topic, p.Partition)
 					metrics.GetOrCreateGauge(underReplicatedMetric, nil).Set(float64(underRepl))
 				}
+
+				// kafka_topic_info{"cluster", "topic", "partition_count", "replication_factor"}
+				topicInfoMetric := fmt.Sprintf(`kafka_topic_info{cluster="%s", topic="%s", partition_count="%d", replication_factor="%d"}`,
+					clabel, tname, len(topic.Partitions), rf)
+				metrics.GetOrCreateGauge(topicInfoMetric, nil).Set(1)
 			}
 
 			lso, err := kadmin.ListStartOffsets(ctx)
@@ -241,7 +256,7 @@ func main() {
 						// kafka_group_topic_partition_time_lag{"cluster", "group", "topic", "partition"}
 						// timeGroupLagMetric := fmt.Sprintf(`kafka_group_topic_partition_time_lag{cluster="%s", group="%s", topic="%s", partition="%d"}`,
 						//	clabel, group, ctopic, part)
-						//metrics.GetOrCreateGauge(timeGroupLagMetric, nil).Set(float64(gpm.TimeLag / time.Millisecond))
+						// metrics.GetOrCreateGauge(timeGroupLagMetric, nil).Set(float64(gpm.TimeLag / time.Millisecond))
 					}
 				}
 			}
